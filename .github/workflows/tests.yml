@@ -1,10 +1,14 @@
-name: tests
+name: Python tests
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - feature/semantic-evaluation-ranking
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - feature/multisource-job-discovery-stage1
 
 jobs:
   unit-tests:
@@ -14,6 +18,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

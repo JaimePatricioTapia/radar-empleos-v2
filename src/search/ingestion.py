@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from src.db.repository import upsert_job_offer
-from src.search.sources import CONNECTORS, SOURCE_REGISTRY
+from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def _parse_published_at(value):
 
 
 def _stable_hash(offer: dict) -> str:
-    url = str(offer.get("source_url") or "").split("?")[0].rstrip("/").lower()
+    url = canonical_job_url(str(offer.get("source_url") or ""))
     identity = url or "|".join(str(offer.get(k) or "").strip().lower()
                                for k in ("title", "company", "location", "source"))
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
@@ -89,6 +89,11 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     existing = (client.table("job_offers").select("id")
                                 .eq("user_id", user_id).eq("job_hash", key)
                                 .limit(1).execute())
+                    if not existing.data and offer.get("source_url"):
+                        existing = (client.table("job_offers").select("id")
+                                    .eq("user_id", user_id)
+                                    .eq("source_url", offer["source_url"])
+                                    .limit(1).execute())
                     if existing.data:
                         stats["duplicates"] += 1
                         source_stats["duplicates"] += 1

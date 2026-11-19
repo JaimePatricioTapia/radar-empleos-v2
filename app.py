@@ -8,6 +8,7 @@ from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, run_discovery
+from src.search.processing import build_job_chunks, evaluate_top_offers, get_processing_status
 from src.search.sources import SOURCE_REGISTRY
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
@@ -171,6 +172,130 @@ if run_search:
     except Exception as exc:
         status.update(label="La búsqueda no pudo completarse", state="error")
         st.error(f"Error ejecutando la búsqueda: {exc}")
+
+
+st.divider()
+st.header("🧠 Preparación semántica y evaluación")
+st.write(
+    "Primero procesamos las ofertas en lotes y comparamos sus fragmentos con los del CV. "
+    "Gemini no se ejecuta durante esta preparación: solo se activa cuando todas las ofertas "
+    "con descripción suficiente ya están vectorizadas."
+)
+try:
+    processing = get_processing_status(client, user_id=user["id"])
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Ofertas nuevas", processing["new_offers"])
+    m2.metric("Ofertas preparadas", processing["chunked_offers"])
+    m3.metric("Pendientes de preparar", processing["pending_chunking"])
+    m4.metric("Sin descripción suficiente", processing["needs_description"])
+    st.caption(f"Excluidas por preferencias (Scrum Master, Santander o salud): {processing['excluded_by_preferences']}")
+    chunk_limit = st.slider("Ofertas a preparar en este lote", 25, 200, 100, 25)
+    if processing["pending_chunking"] > 0:
+        if st.button("🧩 Preparar siguiente lote (sin Gemini)", type="primary"):
+            with st.spinner("Fragmentando ofertas y generando embeddings..."):
+                result = build_job_chunks(client, user_id=user["id"], limit=chunk_limit)
+            st.success(
+                f"Lote procesado: {result['offers_chunked']} ofertas y "
+                f"{result['chunks_saved']} fragmentos vectorizados."
+            )
+            st.caption(f"Descripciones insuficientes: {result['insufficient']} · Filtradas por preferencias: {result['excluded']}")
+            st.rerun()
+    elif processing["chunked_offers"] > 0:
+        st.success("Todas las ofertas con descripción suficiente ya están preparadas.")
+    if processing["needs_description"] > 0:
+        st.warning(
+            f"{processing['needs_description']} ofertas no se evaluarán todavía porque "
+            "su descripción es demasiado corta o incompleta."
+        )
+    top_k = st.slider("Máximo de ofertas que recibirá Gemini", 10, 100, 35, 5)
+    can_evaluate = processing["pending_chunking"] == 0 and processing["chunked_offers"] > 0
+    if st.button("🎯 Evaluar las mejores ofertas con Gemini", type="primary", disabled=not can_evaluate):
+        with st.spinner("Comparando similitud semántica y evaluando solo el top seleccionado..."):
+            try:
+                eval_stats = evaluate_top_offers(client, user_id=user["id"], top_k=top_k)
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Preseleccionadas", eval_stats["ranked"])
+                c2.metric("Evaluadas con Gemini", eval_stats["evaluated"])
+                c3.metric("Filtradas por preferencias", eval_stats["skipped_excluded"])
+                if eval_stats["results"]:
+                    st.subheader("Mejores oportunidades evaluadas")
+                    for item in eval_stats["results"]:
+                        with st.container(border=True):
+                            st.markdown(f"**{item['title']}**")
+                            st.write(
+                                f"{item.get('company') or 'Empresa no informada'} · "
+                                f"{item['sector_category']} · Afinidad **{item['affinity_score']}%** · "
+                                f"Prioridad **{item['priority_score']}/100**"
+                            )
+                            st.caption(
+                                f"Veredicto: {item['verdict']} · "
+                                f"Similitud semántica previa: {item.get('semantic_similarity')}"
+                            )
+                            if item.get("source_url"):
+                                st.link_button("Abrir oferta original", item["source_url"])
+                if eval_stats["errors"]:
+                    with st.expander(f"Incidencias ({len(eval_stats['errors'])})"):
+                        for error in eval_stats["errors"]:
+                            st.write(f"- {error}")
+            except Exception as exc:
+                st.error(f"No se pudo completar la evaluación: {type(exc).__name__}: {exc}")
+except Exception as exc:
+    st.error(f"No se pudo consultar el estado de preparación: {exc}")
+
+st.divider()
+st.header("📌 Bandeja priorizada")
+st.caption("Solo se muestran oportunidades nuevas. El orden usa prioridad estratégica y afinidad calculadas.")
+try:
+    inbox = (client.table("job_offers")
+             .select("id,title,company,location,source,source_url,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
+             .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
+             .order("priority_score", desc=True).order("affinity_score", desc=True)
+             .limit(100).execute().data or [])
+    inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]
+    inbox.sort(key=lambda item: (item.get("priority_score") is not None, item.get("priority_score") or -1, item.get("affinity_score") or -1), reverse=True)
+    if not inbox:
+        st.info("Todavía no hay ofertas nuevas en la bandeja.")
+    for item in inbox:
+        with st.container(border=True):
+            st.markdown(f"**{item['title']}**")
+            st.write(
+                f"{item.get('company') or 'Empresa no informada'} · "
+                f"{item.get('sector_category') or 'POR_CLASIFICAR'}"
+            )
+            if item.get("affinity_score") is not None:
+                st.write(
+                    f"Afinidad: **{item['affinity_score']}%** · "
+                    f"Prioridad: **{item.get('priority_score') or 0}/100**"
+                )
+            else:
+                st.caption("Pendiente de evaluación")
+            if item.get("source_url"):
+                st.link_button("Abrir publicación", item["source_url"])
+            with st.form(f"lifecycle_{item['id']}"):
+                new_status = st.selectbox(
+                    "Estado", ["NUEVA", "POSTULADO", "DESCARTADO", "CADUCADO", "ERROR"],
+                    index=0, key=f"status_{item['id']}"
+                )
+                reason = st.text_input("Motivo / nota (opcional)", key=f"reason_{item['id']}")
+                save_status = st.form_submit_button("Guardar estado")
+            if save_status and new_status != item["lifecycle_status"]:
+                try:
+                    client.rpc("set_job_offer_lifecycle_status", {
+                        "target_job_offer_id": item["id"],
+                        "new_status": new_status,
+                        "reason": reason.strip() or None
+                    }).execute()
+                    if new_status == "POSTULADO":
+                        client.table("applications").upsert({
+                            "user_id": user["id"], "job_offer_id": item["id"],
+                            "status": "postulado", "notes": reason.strip() or None
+                        }, on_conflict="user_id,job_offer_id").execute()
+                    st.success("Estado actualizado.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo actualizar el estado: {exc}")
+except Exception as exc:
+    st.error(f"No se pudo cargar la bandeja: {exc}")
 
 st.divider()
 st.subheader("Evaluar una oferta manualmente")
