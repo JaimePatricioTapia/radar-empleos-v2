@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.evaluation.service import evaluate_job_offer
+
 from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
@@ -93,4 +95,47 @@ if st.button("Procesar mi CV", type="primary", disabled=not cv_path.strip()):
 
 st.divider()
 st.subheader("Estado de la siguiente etapa")
-st.info("La autenticación y la ingesta del CV están conectadas. La recuperación semántica y la evaluación de ofertas se habilitarán en la siguiente iteración.")
+st.divider()
+st.subheader("Evaluar una oferta laboral")
+st.write("Pegue una oferta. Radar buscará evidencia pertinente en su CV y enviará esos fragmentos a Gemini para una evaluación estructurada.")
+with st.form("evaluate_offer_form"):
+    offer_title = st.text_input("Cargo", placeholder="Business Analyst Senior")
+    offer_company = st.text_input("Empresa (opcional)")
+    offer_location = st.text_input("Ubicación (opcional)")
+    offer_url = st.text_input("URL del aviso (opcional)")
+    offer_description = st.text_area("Descripción y requisitos", height=240, placeholder="Pegue aquí el contenido completo del aviso...")
+    evaluate_submitted = st.form_submit_button("Evaluar compatibilidad", type="primary")
+
+if evaluate_submitted:
+    if not offer_title.strip() or not offer_description.strip():
+        st.warning("Debe ingresar el cargo y la descripción de la oferta.")
+    else:
+        payload = {
+            "title": offer_title,
+            "company": offer_company or None,
+            "location": offer_location or None,
+            "source_url": offer_url or None,
+            "source": "manual",
+            "description": offer_description,
+        }
+        with st.spinner("Buscando evidencia en su CV y evaluando con Gemini..."):
+            try:
+                result = evaluate_job_offer(payload, client=client, user_id=user["id"])
+                evaluation = result["evaluation"]
+                st.success("Evaluación guardada en Radar 2.0.")
+                score_col, verdict_col = st.columns(2)
+                score_col.metric("Compatibilidad estimada", f"{evaluation['score_match']}/100")
+                verdict_col.metric("Recomendación", evaluation["verdict"])
+                st.markdown("**Fortalezas identificadas**")
+                for item in evaluation.get("strengths", []):
+                    st.write(f"- {item}")
+                st.markdown("**Brechas identificadas**")
+                for item in evaluation.get("gaps", []):
+                    st.write(f"- {item}")
+                st.markdown("**Evidencia recuperada del CV**")
+                for item in result["evidence"]:
+                    with st.expander(f"{item['section']} · similitud {item.get('similarity', 0):.3f}"):
+                        st.write(item["text"])
+                st.caption(f"Modelo: {result['model']} · Prompt: {result['prompt_version']} · ID evaluación: {result['evaluation_id']}")
+            except Exception as exc:
+                st.error(f"No se pudo completar la evaluación: {exc}")
