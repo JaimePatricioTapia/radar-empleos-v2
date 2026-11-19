@@ -1,0 +1,17 @@
+{
+  "case_id": "demo-001",
+  "description": "Caso sintético para validar el formato del benchmark; no representa una oferta real.",
+  "offer": {
+    "title": "Analista Funcional de Sistemas",
+    "company": "Empresa de prueba",
+    "description": "Levantamiento de requerimientos, coordinación con tecnología y seguimiento de backlog."
+  },
+  "reference": {
+    "verdict": "POSTULAR CON RESERVAS",
+    "score_range": [55, 75],
+    "mandatory_requirements": ["levantamiento de requerimientos"],
+    "desirable_requirements": ["experiencia en el sector financiero"],
+    "exclusion_reasons": [],
+    "reviewed_by_human": false
+  }
+}
