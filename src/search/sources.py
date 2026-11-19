@@ -56,7 +56,7 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
     description = clean_text(description)
     raw_metadata = dict(raw_metadata or {})
     raw_metadata.setdefault("description_quality", "usable" if len(description) >= 150 else "short_or_missing")
-    canonical = url.split("?")[0].rstrip("/").lower()
+    canonical = canonical_job_url(url)
     identity = canonical or "|".join((title.lower(), company.lower(), location.lower(), source))
     job_hash = hashlib.sha256(identity.encode("utf-8")).hexdigest()
     return {
