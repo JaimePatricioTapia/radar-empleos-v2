@@ -69,7 +69,7 @@ def _priority_score(affinity: int, sector: str) -> int:
     return max(0, min(100, round(0.75 * affinity + 0.25 * sector_weight)))
 
 
-def build_job_chunks(client: Any, *, user_id: str, limit: int = 500) -> dict:
+def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     """Genera chunks/embeddings solo para ofertas nuevas que aún no se procesaron."""
     settings = get_settings()
     offers = (client.table("job_offers")
@@ -227,8 +227,8 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
     return stats
 
 
-def run_evaluation_pipeline(client: Any, *, user_id: str, top_k: int = 35) -> dict:
+def run_evaluation_pipeline(client: Any, *, user_id: str, top_k: int = 35, chunk_limit: int = 100) -> dict:
     """Prepara ofertas, calcula ranking semántico y evalúa solo las mejores."""
-    chunk_stats = build_job_chunks(client, user_id=user_id)
+    chunk_stats = build_job_chunks(client, user_id=user_id, limit=chunk_limit)
     evaluation_stats = evaluate_top_offers(client, user_id=user_id, top_k=top_k)
     return {"chunking": chunk_stats, "evaluation": evaluation_stats}
