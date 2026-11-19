@@ -1,33 +1,34 @@
-# Arquitectura propuesta — Radar 2.0
+# Arquitectura de Radar 2.0
 
-## Flujo de CV y control de versiones
+## Flujo objetivo
 
-1. Leer el PDF local configurado en `CV_PDF_PATH`.
-2. Calcular SHA-256 sobre los bytes del archivo. El hash, no la fecha del archivo, es la fuente de verdad para detectar cambios de contenido.
-3. Comparar el manifiesto previo con el hash del CV, versión del chunker y modelo de embeddings.
-4. Si alguno cambió, regenerar fragmentos y embeddings; si no cambió ninguno, reutilizar artefactos válidos.
-5. Registrar por separado hash del CV, versión del chunker y modelo de embeddings. Cambiar modelo o estrategia de segmentación también invalida los vectores correspondientes.
+1. Leer el PDF local y calcular SHA-256.
+2. Comparar hash, versión del chunker y modelo de embeddings con el manifiesto persistido.
+3. Si cambió algún componente, extraer texto y generar chunks.
+4. Generar embeddings Gemini `gemini-embedding-001` de 3.072 dimensiones.
+5. Persistir versión del CV, chunks y vectores en Supabase de desarrollo.
+6. Ingerir ofertas conservando texto original, URL, fuente y hash.
+7. Para evaluar una oferta, generar embedding de consulta, recuperar evidencia CV con pgvector y enviar solo evidencia pertinente a Gemini.
+8. Guardar salida estructurada, versión del prompt/modelo y los IDs de evidencia.
+9. Comparar predicciones con el benchmark humano.
 
-## Flujo de evaluación
+## Persistencia
 
-1. Normalizar oferta y extraer requisitos.
-2. Aplicar filtros determinísticos para restricciones explícitas.
-3. Recuperar chunks pertinentes mediante embeddings (y, cuando sea útil, búsqueda textual).
-4. Entregar a Gemini la oferta, perfil estructurado y evidencia recuperada.
-5. Validar la salida Pydantic y coherencia básica entre requisitos y veredicto.
-6. Persistir evaluación, versión del prompt, modelo, hash del CV, hash de la oferta y evidencia utilizada.
+El modelo de datos está documentado en `docs/DATA_MODEL.md` y el SQL inicial en `supabase/schema.sql`. El PDF fuente no se almacena en Supabase ni GitHub. Se conservan el texto extraído, sus fragmentos, hashes y embeddings.
 
-## Diseño de pruebas
+## Seguridad y entornos
 
-- Pruebas unitarias sin red para lectura, hash, chunking, esquemas y métricas.
-- Benchmark con ofertas etiquetadas por una persona, incluyendo casos negativos y ambiguos.
-- Pruebas de consistencia con paráfrasis de una misma oferta.
-- Pruebas de no invención y cumplimiento de restricciones.
-- Comparación de versiones con el mismo dataset y configuración.
+- Supabase 2.0 debe ser un proyecto separado.
+- Las tablas activan RLS y vinculan cada fila a `auth.uid()`.
+- Las políticas no confían en metadatos editables por el usuario.
+- La RPC de recuperación es `SECURITY INVOKER`, con filtro explícito de usuario y RLS como segunda barrera.
+- La aplicación usa sesión Auth y clave publicable/anon; no usa service_role.
+- El esquema SQL aún no se ha aplicado ni validado en una instancia.
 
-## Decisiones pendientes de validar
+## Embeddings
 
-- Confirmar estructura de datos actual de Supabase y diseñar migración aislada para desarrollo.
-- Elegir estrategia de embeddings y dimensiones efectivas del modelo seleccionado.
-- Determinar tamaño/solapamiento de chunks tras inspeccionar el CV real; no asumir que el primer chunker es definitivo.
-- Auditar y migrar ingesta y Streamlit desde el repositorio original sin credenciales ni datos personales.
+Se fija el modelo y dimensión en el manifiesto. Los embeddings de documentos usan tarea `RETRIEVAL_DOCUMENT`; las consultas, `RETRIEVAL_QUERY`. Ambos deben utilizar el mismo modelo y dimensión. La columna conserva `vector(3072)`; el índice HNSW usa una expresión `halfvec(3072)` porque pgvector limita HNSW a 4.000 dimensiones para halfvec y 2.000 para vector.
+
+## Estado
+
+La persistencia y recuperación tienen primeras implementaciones, pero la autenticación de la interfaz, la ingesta completa, las operaciones transaccionales y el benchmark continúan pendientes. No se debe tratar esta versión como despliegue productivo.
