@@ -188,6 +188,7 @@ try:
     m2.metric("Ofertas preparadas", processing["chunked_offers"])
     m3.metric("Pendientes de preparar", processing["pending_chunking"])
     m4.metric("Sin descripción suficiente", processing["needs_description"])
+    st.caption(f"Excluidas por preferencias (Scrum Master, Santander o salud): {processing['excluded_by_preferences']}")
     chunk_limit = st.slider("Ofertas a preparar en este lote", 25, 200, 100, 25)
     if processing["pending_chunking"] > 0:
         if st.button("🧩 Preparar siguiente lote (sin Gemini)", type="primary"):
@@ -197,7 +198,8 @@ try:
                 f"Lote procesado: {result['offers_chunked']} ofertas y "
                 f"{result['chunks_saved']} fragmentos vectorizados."
             )
-            st.caption(f"Descripciones insuficientes en este lote: {result['insufficient']}.")
+            st.caption(f"Descripciones insuficientes: {result['insufficient']} · Filtradas por preferencias: {result['excluded']}")
+            st.rerun()
     elif processing["chunked_offers"] > 0:
         st.success("Todas las ofertas con descripción suficiente ya están preparadas.")
     if processing["needs_description"] > 0:
