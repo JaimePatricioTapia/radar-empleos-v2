@@ -35,4 +35,13 @@ def retrieve_cv_evidence(
             "filter_section": None,
         },
     ).execute()
-    return response.data or []
+    # Normalizar al contrato que consume el evaluador (text, no content).
+    return [
+        {
+            "chunk_id": item["chunk_id"],
+            "section": item["section"],
+            "text": item["content"],
+            "similarity": item.get("similarity"),
+        }
+        for item in (response.data or [])
+    ]
