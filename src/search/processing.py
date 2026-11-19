@@ -96,7 +96,7 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
             continue
         metadata = offer.get("raw_metadata") or {}
         description = (offer.get("description") or "").strip()
-        if len(description) < 120 or metadata.get("description_quality") == "short_or_missing":
+        if len(description) < 150:
             insufficient += 1
             client.table("job_offers").update({
                 "raw_metadata": {**metadata, "processing": {
