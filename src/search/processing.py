@@ -120,8 +120,6 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
         pending.append(offer)
         for chunk in chunks:
             chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
-        for chunk in chunks:
-            chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
 
     if not chunk_rows:
         return {"offers_seen": len(offers), "offers_chunked": 0, "chunks_saved": 0,
