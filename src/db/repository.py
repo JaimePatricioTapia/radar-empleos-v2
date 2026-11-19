@@ -31,7 +31,7 @@ def save_cv_snapshot(
         "cv_hash": cv_hash,
         "source_filename": cv_metadata.get("filename"),
         "page_count": cv_metadata.get("page_count"),
-        "char_count": cv_metadata.get("char_count"),
+        "char_count": cv_metadata.get("char_count", cv_metadata.get("character_count")),
         "chunker_version": chunker_version,
         "embedding_model": embedding_model,
         "embedding_dimensions": 3072,
@@ -45,7 +45,6 @@ def save_cv_snapshot(
     version = version_result.data[0]
     version_id = version["id"]
 
-    client.table("cv_chunks").delete().eq("cv_version_id", version_id).execute()
     rows = []
     for index, (chunk, vector) in enumerate(zip(chunks, embeddings)):
         rows.append({
@@ -59,7 +58,15 @@ def save_cv_snapshot(
             "embedding_model": embedding_model,
             "embedding": vector,
         })
-    client.table("cv_chunks").insert(rows).execute()
+    # Primero insertar/actualizar todo lo nuevo. No borrar la versión anterior
+    # hasta que la carga haya terminado correctamente.
+    client.table("cv_chunks").upsert(
+        rows, on_conflict="cv_version_id,chunk_id"
+    ).execute()
+    current_ids = [row["chunk_id"] for row in rows]
+    client.table("cv_chunks").delete().eq(
+        "cv_version_id", version_id
+    ).not_.in_("chunk_id", current_ids).execute()
 
     # Activar al final: la versión anterior permanece activa si la carga falla.
     client.table("cv_versions").update({"is_active": False}).eq("user_id", user_id).neq("id", version_id).execute()
