@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
+import json
 from google import genai
 from src.config import get_settings
 from src.evaluation.schemas import OfferEvaluation
@@ -45,7 +46,7 @@ def evaluate_offer(
     }
     response = client.models.generate_content(
         model=model_name,
-        contents=(load_system_prompt() + "\\n\\nINPUT JSON:\\n" + __import__("json").dumps(payload, ensure_ascii=False)),
+        contents=(load_system_prompt() + "\\n\\nINPUT JSON:\\n" + json.dumps(payload, ensure_ascii=False)),
         config={
             "response_mime_type": "application/json",
             "response_schema": OfferEvaluation,
