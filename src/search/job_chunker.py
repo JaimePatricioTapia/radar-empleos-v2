@@ -29,8 +29,8 @@ def chunk_job_description(title: str, description: str, *, max_chars: int = 1100
     source = f"Cargo: {title.strip()}\n\n{description.strip()}".strip()
     if len(source) < 150:
         return []
-    paragraphs = [re.sub(r"\\s+", " ", p).strip()
-                  for p in re.split(r"\\n+|(?<=[.!?])\\s{2,}", source) if p.strip()]
+    paragraphs = [re.sub(r"\s+", " ", p).strip()
+                  for p in re.split(r"\n+|(?<=[.!?])\s{2,}", source) if p.strip()]
     chunks, buffer, current_section = [], "", "general"
 
     def flush():
