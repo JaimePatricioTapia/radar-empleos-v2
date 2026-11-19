@@ -117,6 +117,20 @@ create index if not exists evaluations_user_date_idx
 create index if not exists applications_user_status_idx
     on public.applications(user_id, status);
 
+-- Índices de soporte para las claves foráneas y filtros de RLS.
+create index if not exists applications_job_offer_user_idx
+    on public.applications(job_offer_id, user_id);
+create index if not exists cv_chunks_version_user_idx
+    on public.cv_chunks(cv_version_id, user_id);
+create index if not exists evaluations_cv_version_user_idx
+    on public.evaluations(cv_version_id, user_id);
+create index if not exists evaluations_job_offer_user_idx
+    on public.evaluations(job_offer_id, user_id);
+create index if not exists job_chunks_offer_user_idx
+    on public.job_chunks(job_offer_id, user_id);
+create index if not exists job_chunks_user_idx
+    on public.job_chunks(user_id);
+
 -- HNSW index on half precision supports 3,072 dimensions (pgvector limit: 4,000).
 -- Stored vectors remain full precision; the index is an expression index.
 create index if not exists cv_chunks_embedding_hnsw
