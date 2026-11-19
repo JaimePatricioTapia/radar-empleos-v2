@@ -65,7 +65,7 @@ def _excluded_reason(offer: dict) -> str | None:
 def _priority_score(affinity: int, sector: str) -> int:
     """Prioridad estratégica separada de la afinidad: 75% afinidad + 25% sector."""
     sector_weight = SECTOR_WEIGHTS.get(sector, 30)
-    return max(0, min(100, round(0.75 * affinity + 0.25 * sector_weight)))
+    return max(0, min(100, int(0.75 * affinity + 0.25 * sector_weight + 0.5)))
 
 
 def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
