@@ -75,7 +75,7 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     offers = (client.table("job_offers")
               .select("id,title,description,raw_metadata,lifecycle_status")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
-              .order("captured_at").limit(limit).execute().data or [])
+              .order("captured_at", desc=True).limit(1000).execute().data or [])
     if not offers:
         return {"offers_seen": 0, "offers_chunked": 0, "chunks_saved": 0, "insufficient": 0}
 
