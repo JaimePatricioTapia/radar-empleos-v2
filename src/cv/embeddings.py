@@ -15,35 +15,38 @@ def embed_texts(
     *,
     task_type: EmbeddingTask = "RETRIEVAL_DOCUMENT",
     output_dimensionality: int = EMBEDDING_DIMENSIONS,
+    batch_size: int = 40,
 ) -> list[list[float]]:
-    """Genera embeddings de documentos o consultas con dimensiones fijas.
-
-    Para comparar vectores, todos deben usar el mismo modelo y dimensión.
-    """
+    """Genera embeddings por lotes con modelo y dimensión fijos."""
     if not texts:
         return []
     if output_dimensionality != EMBEDDING_DIMENSIONS:
         raise ValueError("Radar 2.0 fija los embeddings en 3.072 dimensiones.")
+    if not 1 <= batch_size <= 250:
+        raise ValueError("batch_size debe estar entre 1 y 250.")
+    if any(not text.strip() for text in texts):
+        raise ValueError("No se pueden generar embeddings de textos vacíos.")
+
     client = genai.Client(api_key=api_key)
     vectors: list[list[float]] = []
-    for text in texts:
-        if not text.strip():
-            raise ValueError("No se pueden generar embeddings de textos vacíos.")
+    for start in range(0, len(texts), batch_size):
+        batch = texts[start : start + batch_size]
         response: Any = client.models.embed_content(
             model=model,
-            contents=text,
+            contents=batch,
             config={
                 "task_type": task_type,
                 "output_dimensionality": output_dimensionality,
             },
         )
-        embedding = getattr(response, "embeddings", None)
-        if not embedding:
-            raise RuntimeError("Gemini no devolvió un embedding para uno de los fragmentos.")
-        vector = list(embedding[0].values)
-        if len(vector) != output_dimensionality:
-            raise RuntimeError(
-                f"Gemini devolvió {len(vector)} dimensiones; se esperaban {output_dimensionality}."
-            )
-        vectors.append(vector)
+        embeddings = getattr(response, "embeddings", None)
+        if not embeddings or len(embeddings) != len(batch):
+            raise RuntimeError("Gemini devolvió una cantidad inesperada de embeddings.")
+        for item in embeddings:
+            vector = list(item.values)
+            if len(vector) != output_dimensionality:
+                raise RuntimeError(
+                    f"Gemini devolvió {len(vector)} dimensiones; se esperaban {output_dimensionality}."
+                )
+            vectors.append(vector)
     return vectors
