@@ -71,6 +71,8 @@ def _priority_score(affinity: int, sector: str) -> int:
 def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     """Genera chunks/embeddings solo para ofertas nuevas que aún no se procesaron."""
     settings = get_settings()
+    if not settings.gemini_api_key:
+        raise ValueError("Falta GEMINI_API_KEY en .env.")
     offers = (client.table("job_offers")
               .select("id,title,description,raw_metadata,lifecycle_status")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
@@ -228,6 +230,10 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
 
 def run_evaluation_pipeline(client: Any, *, user_id: str, top_k: int = 35, chunk_limit: int = 100) -> dict:
     """Prepara ofertas, calcula ranking semántico y evalúa solo las mejores."""
+    active_cv = (client.table("cv_versions").select("id").eq("user_id", user_id)
+                 .eq("is_active", True).limit(1).execute().data or [])
+    if not active_cv:
+        raise ValueError("Primero debe procesar su CV.")
     chunk_stats = build_job_chunks(client, user_id=user_id, limit=chunk_limit)
     evaluation_stats = evaluate_top_offers(client, user_id=user_id, top_k=top_k)
     return {"chunking": chunk_stats, "evaluation": evaluation_stats}
