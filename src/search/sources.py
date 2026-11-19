@@ -11,7 +11,7 @@ import html
 import re
 import unicodedata
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -28,6 +28,21 @@ def clean_text(value: Any) -> str:
         return ""
     text = BeautifulSoup(str(value), "html.parser").get_text(" ", strip=True)
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+
+def canonical_job_url(url: str) -> str:
+    """Normaliza tracking sin borrar parámetros que identifican una vacante (p. ej. Indeed jk)."""
+    parts = urlsplit(str(url or "").strip())
+    identity_keys = {"jk", "vjk", "jobid", "job_id", "gh_jid", "reqid", "rid", "jid", "id"}
+    identity_params = sorted(
+        (key.lower(), value) for key, value in parse_qsl(parts.query, keep_blank_values=False)
+        if key.lower() in identity_keys
+    )
+    return urlunsplit((
+        parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"),
+        urlencode(identity_params), ""
+    ))
 
 
 def normalize_offer(*, source: str, title: str, url: str, company: str = "",
