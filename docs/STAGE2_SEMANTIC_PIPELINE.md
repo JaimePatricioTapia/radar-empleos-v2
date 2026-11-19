@@ -26,13 +26,14 @@ La prioridad no altera la afinidad. Los pesos son parámetros de producto que se
 - Prioridad estratégica para Minería y Proveedor minero.
 - La evaluación puede reconocer la transferencia de experiencia operacional minera y experiencia tecnológica/funcional bancaria, pero no puede inventar experiencia o certificaciones.
 
-## Operación incremental
+## Operación incremental y ahorro de tokens
 
-En la app, procesar lotes de 100 ofertas. Se pueden ejecutar varias veces:
-- Cada ejecución procesa ofertas NUEVA que aún no tienen Job Chunks.
-- La función de ranking excluye las ofertas ya evaluadas con el CV activo.
-- Las ofertas con descripciones insuficientes quedan marcadas para enriquecimiento y no consumen llamadas de Gemini.
-- Los errores de evaluación se muestran para permitir reintento.
+La app separa dos acciones deliberadamente:
+
+1. **Preparar ofertas:** procesar lotes de 100 ofertas por ejecución. Se repite hasta que el contador "Pendientes de preparar" llegue a cero. Esta fase solo genera embeddings; no llama a Gemini.
+2. **Evaluar las mejores:** recién cuando todas las ofertas aptas están vectorizadas, se ejecuta el ranking global y se envía a Gemini un top configurable (35 por defecto).
+
+Así se evita evaluar las primeras ofertas capturadas antes de conocer la similitud de las restantes. La función de ranking excluye las ofertas ya evaluadas con el CV activo. Las descripciones insuficientes quedan pendientes de enriquecimiento y no consumen llamadas de Gemini. Los errores de evaluación se muestran para permitir reintento.
 
 ## Historial y no repetición
 
