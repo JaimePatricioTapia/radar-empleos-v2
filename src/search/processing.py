@@ -78,7 +78,7 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .order("captured_at", desc=True).limit(1000).execute().data or [])
     if not offers:
-        return {"offers_seen": 0, "offers_chunked": 0, "chunks_saved": 0, "insufficient": 0}
+        return {"offers_seen": 0, "offers_chunked": 0, "chunks_saved": 0, "insufficient": 0, "excluded": 0, "eligible_pending": 0}
 
     offer_ids = [item["id"] for item in offers]
     existing_rows = []
@@ -89,13 +89,16 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
             .execute().data or []
         )
     already = {row["job_offer_id"] for row in existing_rows}
-    pending, chunk_rows = [], []
+    eligible, chunk_rows = [], []
     insufficient = 0
     excluded = 0
     for offer in offers:
         if offer["id"] in already:
             continue
         metadata = offer.get("raw_metadata") or {}
+        if metadata.get("evaluation_filter"):
+            excluded += 1
+            continue
         reason = _excluded_reason(offer)
         if reason:
             client.table("job_offers").update({
@@ -113,17 +116,19 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
                 }}
             }).eq("id", offer["id"]).eq("user_id", user_id).execute()
             continue
-        chunks = chunk_job_description(offer["title"], description)
+        eligible.append(offer)
+    pending = eligible[:limit]
+    for offer in pending:
+        chunks = chunk_job_description(offer["title"], offer["description"])
         if not chunks:
             insufficient += 1
             continue
-        pending.append(offer)
         for chunk in chunks:
             chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
-
     if not chunk_rows:
         return {"offers_seen": len(offers), "offers_chunked": 0, "chunks_saved": 0,
-                "insufficient": insufficient}
+                "insufficient": insufficient, "excluded": excluded,
+                "eligible_pending": max(0, len(eligible) - len(pending))}
     vectors = embed_texts(
         [row["content"] for row in chunk_rows], api_key=settings.gemini_api_key,
         model=settings.embedding_model, task_type="RETRIEVAL_DOCUMENT",
@@ -140,7 +145,8 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
             rows[start:start + 100], on_conflict="job_offer_id,chunk_index"
         ).execute()
     return {"offers_seen": len(offers), "offers_chunked": len(pending),
-            "chunks_saved": len(rows), "insufficient": insufficient}
+            "chunks_saved": len(rows), "insufficient": insufficient,
+            "excluded": excluded, "eligible_pending": max(0, len(eligible) - len(pending))}
 
 
 def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
@@ -240,17 +246,20 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
 
 def get_processing_status(client: Any, *, user_id: str) -> dict:
     """Cuenta ofertas NUEVA aptas, procesadas y pendientes de fragmentación."""
-    offers = (client.table("job_offers").select("id,description")
+    offers = (client.table("job_offers").select("id,title,company,description,raw_metadata")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .limit(2000).execute().data or [])
     offer_ids = {row["id"] for row in offers}
     chunk_rows = (client.table("job_chunks").select("job_offer_id")
                   .eq("user_id", user_id).limit(20000).execute().data or [])
     chunked_ids = {row["job_offer_id"] for row in chunk_rows if row["job_offer_id"] in offer_ids}
-    eligible_ids = {row["id"] for row in offers if len((row.get("description") or "").strip()) >= 150}
+    eligible = [row for row in offers if not (row.get("raw_metadata") or {}).get("evaluation_filter")
+                and not _excluded_reason(row)]
+    eligible_ids = {row["id"] for row in eligible if len((row.get("description") or "").strip()) >= 150}
     return {
         "new_offers": len(offers),
         "chunked_offers": len(chunked_ids),
         "pending_chunking": len(eligible_ids - chunked_ids),
-        "needs_description": len(offers) - len(eligible_ids),
+        "needs_description": sum(1 for row in eligible if len((row.get("description") or "").strip()) < 150),
+        "excluded_by_preferences": len(offers) - len(eligible),
     }
