@@ -30,7 +30,7 @@ En Supabase Dashboard > Authentication > Providers, confirme que Email esté hab
 streamlit run app.py
 ```
 
-La aplicación permite crear una cuenta o iniciar sesión. Luego, **Procesar mi CV** lee el PDF local, calcula SHA-256, crea fragmentos y embeddings Gemini y guarda texto/embeddings en el proyecto independiente. El archivo PDF binario no se carga.
+La aplicación permite crear una cuenta o iniciar sesión. Luego, **Procesar mi CV** lee el PDF local, calcula SHA-256, crea fragmentos y embeddings Gemini y guarda texto/embeddings en el proyecto independiente. El archivo PDF binario no se carga. En **Evaluar una oferta laboral**, pegue el cargo y descripción para recuperar evidencia semántica del CV, solicitar evaluación estructurada a Gemini y guardar el resultado en el historial.
 
 ## Seguridad
 
