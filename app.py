@@ -228,7 +228,7 @@ try:
              .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
              .order("priority_score", desc=True).order("affinity_score", desc=True)
              .limit(100).execute().data or [])
-    inbox.sort(key=lambda item: (item.get("priority_score") is not None, item.get("priority_score") or -1, item.get("affinity_score") or -1), reverse=True)
+    inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]\n    inbox.sort(key=lambda item: (item.get("priority_score") is not None, item.get("priority_score") or -1, item.get("affinity_score") or -1), reverse=True)
     if not inbox:
         st.info("Todavía no hay ofertas nuevas en la bandeja.")
     for item in inbox:
