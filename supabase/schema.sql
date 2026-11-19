@@ -276,6 +276,8 @@ create table if not exists public.offer_lifecycle_events (
 
 create index if not exists offer_lifecycle_events_offer_date_idx
     on public.offer_lifecycle_events(job_offer_id, created_at desc);
+create index if not exists offer_lifecycle_events_job_offer_user_idx
+    on public.offer_lifecycle_events(job_offer_id, user_id);
 alter table public.offer_lifecycle_events enable row level security;
 drop policy if exists offer_lifecycle_events_owner_all on public.offer_lifecycle_events;
 create policy offer_lifecycle_events_owner_all on public.offer_lifecycle_events
