@@ -1,12 +1,12 @@
 # Arquitectura propuesta — Radar 2.0
 
-## Flujo de CV
+## Flujo de CV y control de versiones
 
 1. Leer el PDF local configurado en `CV_PDF_PATH`.
-2. Calcular SHA-256 sobre los bytes del archivo.
-3. Comparar el hash con la versión previamente procesada.
-4. Si cambió, extraer texto, segmentar y regenerar embeddings; si no cambió, reutilizar los artefactos válidos.
-5. Registrar por separado hash del CV, versión del chunker y modelo de embeddings. Un cambio de modelo o estrategia de segmentación también invalida los vectores correspondientes.
+2. Calcular SHA-256 sobre los bytes del archivo. El hash, no la fecha del archivo, es la fuente de verdad para detectar cambios de contenido.
+3. Comparar el manifiesto previo con el hash del CV, versión del chunker y modelo de embeddings.
+4. Si alguno cambió, regenerar fragmentos y embeddings; si no cambió ninguno, reutilizar artefactos válidos.
+5. Registrar por separado hash del CV, versión del chunker y modelo de embeddings. Cambiar modelo o estrategia de segmentación también invalida los vectores correspondientes.
 
 ## Flujo de evaluación
 
@@ -15,7 +15,7 @@
 3. Recuperar chunks pertinentes mediante embeddings (y, cuando sea útil, búsqueda textual).
 4. Entregar a Gemini la oferta, perfil estructurado y evidencia recuperada.
 5. Validar la salida Pydantic y coherencia básica entre requisitos y veredicto.
-6. Persistir evaluación, prompt version, modelo, hash CV, hash oferta y evidencia utilizada.
+6. Persistir evaluación, versión del prompt, modelo, hash del CV, hash de la oferta y evidencia utilizada.
 
 ## Diseño de pruebas
 
