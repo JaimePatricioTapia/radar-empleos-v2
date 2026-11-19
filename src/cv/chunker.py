@@ -5,7 +5,6 @@ con estructura específica del CV y revisión visual de fragmentos.
 """
 from __future__ import annotations
 import hashlib
-import re
 from typing import Any
 
 SECTION_HINTS = {
