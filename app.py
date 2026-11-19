@@ -181,11 +181,11 @@ st.write(
     "los fragmentos de cada oferta con los de su CV. Gemini evalúa solamente las mejores ofertas "
     "preseleccionadas; la similitud semántica no se presenta como afinidad laboral."
 )
-top_k = st.slider("Máximo de ofertas preseleccionadas para Gemini", 10, 100, 35, 5)
+top_k = st.slider("Máximo de ofertas preseleccionadas para Gemini", 10, 100, 35, 5)\nchunk_limit = st.slider("Ofertas a fragmentar en esta ejecución", 25, 200, 100, 25)
 if st.button("⚙️ Procesar y evaluar mejores ofertas", type="primary"):
     with st.spinner("Preparando fragmentos, embeddings y ranking semántico..."):
         try:
-            pipeline = run_evaluation_pipeline(client, user_id=user["id"], top_k=top_k)
+            pipeline = run_evaluation_pipeline(client, user_id=user["id"], top_k=top_k, chunk_limit=chunk_limit)
             chunk_stats = pipeline["chunking"]
             eval_stats = pipeline["evaluation"]
             c1, c2, c3, c4 = st.columns(4)
@@ -254,16 +254,10 @@ try:
                 save_status = st.form_submit_button("Guardar estado")
             if save_status and new_status != item["lifecycle_status"]:
                 try:
-                    client.table("job_offers").update({
-                        "lifecycle_status": new_status,
-                        "lifecycle_reason": reason.strip() or None,
-                        "lifecycle_updated_at": "now()"
-                    }).eq("id", item["id"]).eq("user_id", user["id"]).execute()
-                    client.table("offer_lifecycle_events").insert({
-                        "user_id": user["id"], "job_offer_id": item["id"],
-                        "previous_status": item["lifecycle_status"],
-                        "new_status": new_status, "reason": reason.strip() or None,
-                        "origin": "app"
+                    client.rpc("set_job_offer_lifecycle_status", {
+                        "target_job_offer_id": item["id"],
+                        "new_status": new_status,
+                        "reason": reason.strip() or None
                     }).execute()
                     if new_status == "POSTULADO":
                         client.table("applications").upsert({
