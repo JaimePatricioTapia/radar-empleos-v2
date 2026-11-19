@@ -17,7 +17,7 @@ Nueva versión independiente del Radar de Empleos. Este repositorio no modifica 
 - Embeddings Gemini de 3.072 dimensiones: adaptador implementado; requiere prueba integrada real.
 - Proyecto Supabase independiente Radar Empleos 2.0: esquema aplicado y verificado.
 - Persistencia de versiones del CV, fragmentos, ofertas y evaluaciones: implementada.
-- Seguridad RLS: habilitada en las seis tablas.
+- Seguridad RLS: habilitada en las siete tablas.
 - Recuperación semántica pgvector del CV: implementada.
 - Autenticación, ingesta local del CV y evaluación manual: implementadas.
 - Etapa 1 — búsqueda automática multifuente: implementada.
