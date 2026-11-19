@@ -228,12 +228,20 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
     return stats
 
 
-def run_evaluation_pipeline(client: Any, *, user_id: str, top_k: int = 35, chunk_limit: int = 100) -> dict:
-    """Prepara ofertas, calcula ranking semántico y evalúa solo las mejores."""
-    active_cv = (client.table("cv_versions").select("id").eq("user_id", user_id)
-                 .eq("is_active", True).limit(1).execute().data or [])
-    if not active_cv:
-        raise ValueError("Primero debe procesar su CV.")
-    chunk_stats = build_job_chunks(client, user_id=user_id, limit=chunk_limit)
-    evaluation_stats = evaluate_top_offers(client, user_id=user_id, top_k=top_k)
-    return {"chunking": chunk_stats, "evaluation": evaluation_stats}
+
+def get_processing_status(client: Any, *, user_id: str) -> dict:
+    """Cuenta ofertas NUEVA aptas, procesadas y pendientes de fragmentación."""
+    offers = (client.table("job_offers").select("id,description")
+              .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
+              .limit(2000).execute().data or [])
+    offer_ids = {row["id"] for row in offers}
+    chunk_rows = (client.table("job_chunks").select("job_offer_id")
+                  .eq("user_id", user_id).limit(20000).execute().data or [])
+    chunked_ids = {row["job_offer_id"] for row in chunk_rows if row["job_offer_id"] in offer_ids}
+    eligible_ids = {row["id"] for row in offers if len((row.get("description") or "").strip()) >= 150}
+    return {
+        "new_offers": len(offers),
+        "chunked_offers": len(chunked_ids),
+        "pending_chunking": len(eligible_ids - chunked_ids),
+        "needs_description": len(offers) - len(eligible_ids),
+    }
