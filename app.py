@@ -181,7 +181,8 @@ st.write(
     "los fragmentos de cada oferta con los de su CV. Gemini evalúa solamente las mejores ofertas "
     "preseleccionadas; la similitud semántica no se presenta como afinidad laboral."
 )
-top_k = st.slider("Máximo de ofertas preseleccionadas para Gemini", 10, 100, 35, 5)\nchunk_limit = st.slider("Ofertas a fragmentar en esta ejecución", 25, 200, 100, 25)
+top_k = st.slider("Máximo de ofertas preseleccionadas para Gemini", 10, 100, 35, 5)
+chunk_limit = st.slider("Ofertas a fragmentar en esta ejecución", 25, 200, 100, 25)
 if st.button("⚙️ Procesar y evaluar mejores ofertas", type="primary"):
     with st.spinner("Preparando fragmentos, embeddings y ranking semántico..."):
         try:
