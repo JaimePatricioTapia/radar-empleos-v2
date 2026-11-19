@@ -4,7 +4,13 @@
 
 Crear un proyecto Supabase NUEVO para Radar 2.0. No usar el proyecto productivo del Radar anterior.
 
-La región recomendada para reducir latencia desde Chile es South America (São Paulo), si está disponible en la organización. El proyecto debe mantenerse en el plan/costo que el usuario haya aprobado.
+El proyecto de desarrollo creado para esta implementación es:
+- Nombre: `Radar Empleos 2.0`
+- Project ref: `lgnlrrvkcugexzvfxhug`
+- Región: `us-east-1` (misma región del proyecto Radar de Empleo existente)
+- Organización: `JaimePatricio's Org`
+
+El proyecto se creó con cotización de US$ 0 mensuales. Los consumos adicionales dependen del uso y del plan.
 
 ## Aplicar el esquema
 
@@ -16,7 +22,7 @@ La región recomendada para reducir latencia desde Chile es South America (São 
 6. En Database > Settings / Data API, revisar la exposición del esquema `public`. Los proyectos nuevos no exponen automáticamente tablas a la Data API; habilitar solo lo necesario.
 7. Crear un usuario Auth de prueba y validar que una sesión autenticada solo lea/escriba sus propias filas.
 
-Este archivo es un bootstrap SQL revisable, no una migración aplicada ni una conexión al proyecto. No ejecutar en producción.
+El esquema fue aplicado al proyecto independiente Radar Empleos 2.0 y verificado. Este archivo conserva el bootstrap SQL revisable para reproducir el esquema en otro entorno. No ejecutar en producción.
 
 ## Modelo de datos
 
