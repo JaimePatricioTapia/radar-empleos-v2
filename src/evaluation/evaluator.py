@@ -46,7 +46,7 @@ def evaluate_offer(
     }
     response = client.models.generate_content(
         model=model_name,
-        contents=(load_system_prompt() + "\\n\\nINPUT JSON:\\n" + json.dumps(payload, ensure_ascii=False)),
+        contents=(load_system_prompt() + "\n\nINPUT JSON:\n" + json.dumps(payload, ensure_ascii=False)),
         config={
             "response_mime_type": "application/json",
             "response_schema": OfferEvaluation,
