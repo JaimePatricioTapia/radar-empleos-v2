@@ -39,6 +39,8 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
     if not title or not url.startswith(("https://", "http://")):
         return None
     description = clean_text(description)
+    raw_metadata = dict(raw_metadata or {})
+    raw_metadata.setdefault("description_quality", "usable" if len(description) >= 150 else "short_or_missing")
     canonical = url.split("?")[0].rstrip("/").lower()
     identity = canonical or "|".join((title.lower(), company.lower(), location.lower(), source))
     job_hash = hashlib.sha256(identity.encode("utf-8")).hexdigest()
@@ -50,7 +52,7 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
         "salary_text": clean_text(salary_text)[:200] or None,
         "description": description[:30000] or title,
         "published_at": published_at or None, "job_hash": job_hash,
-        "raw_metadata": raw_metadata or {},
+        "raw_metadata": raw_metadata,
     }
 
 
@@ -253,7 +255,7 @@ def search_codelco(query: str, limit: int = 12) -> list[dict]:
         offer = normalize_offer(
             source="codelco", title=title, url=urljoin(base, link.get("href", "")),
             company="Codelco", location=row.get_text(" ", strip=True) if row else "Chile",
-            description=f"{title}. Convocatoria publicada en el portal de empleos de Codelco.",
+            description="",
         )
         if offer:
             results.append(offer)
