@@ -21,7 +21,7 @@ SECTOR_WEIGHTS = {
 }
 EXCLUDED_ROLE_TERMS = ("scrum master",)
 EXCLUDED_COMPANIES = ("banco santander", "santander chile")
-HEALTH_TERMS = ("isapre", "clínica", "clinica", "hospital", "salud", "centro médico")
+HEALTH_TERMS = ("isapre", "clínica", "clinica", "hospital", "centro médico", "centro medico")
 
 
 def classify_sector(offer: dict) -> str:
@@ -53,12 +53,11 @@ def classify_sector(offer: dict) -> str:
 def _excluded_reason(offer: dict) -> str | None:
     title = (offer.get("title") or "").lower()
     company = (offer.get("company") or "").lower()
-    text = f"{title} {company} {(offer.get('description') or '')[:1500]}".lower()
     if any(term in title for term in EXCLUDED_ROLE_TERMS):
         return "Cargo Scrum Master fuera de los objetivos actuales."
     if any(term in company for term in EXCLUDED_COMPANIES):
         return "Empresa excluida de las preferencias actuales."
-    if any(term in text for term in HEALTH_TERMS):
+    if any(term in f"{title} {company}" for term in HEALTH_TERMS):
         return "Sector salud fuera de las preferencias actuales."
     return None
 
