@@ -43,7 +43,7 @@ def _parse_published_at(value):
 
 
 def _stable_hash(offer: dict) -> str:
-    url = str(offer.get("source_url") or "").split("?")[0].rstrip("/").lower()
+    url = canonical_job_url(str(offer.get("source_url") or ""))
     identity = url or "|".join(str(offer.get(k) or "").strip().lower()
                                for k in ("title", "company", "location", "source"))
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
