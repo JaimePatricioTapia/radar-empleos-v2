@@ -74,7 +74,7 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
     offers = (client.table("job_offers")
-              .select("id,title,description,raw_metadata,lifecycle_status")
+              .select("id,title,company,description,raw_metadata,lifecycle_status")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .order("captured_at", desc=True).limit(1000).execute().data or [])
     if not offers:
@@ -91,10 +91,19 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     already = {row["job_offer_id"] for row in existing_rows}
     pending, chunk_rows = [], []
     insufficient = 0
+    excluded = 0
     for offer in offers:
         if offer["id"] in already:
             continue
         metadata = offer.get("raw_metadata") or {}
+        reason = _excluded_reason(offer)
+        if reason:
+            client.table("job_offers").update({
+                "sector_category": classify_sector(offer),
+                "raw_metadata": {**metadata, "evaluation_filter": reason}
+            }).eq("id", offer["id"]).eq("user_id", user_id).execute()
+            excluded += 1
+            continue
         description = (offer.get("description") or "").strip()
         if len(description) < 150:
             insufficient += 1
@@ -109,6 +118,8 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
             insufficient += 1
             continue
         pending.append(offer)
+        for chunk in chunks:
+            chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
         for chunk in chunks:
             chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
 
