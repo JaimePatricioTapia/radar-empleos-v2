@@ -13,13 +13,19 @@ from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url
 logger = logging.getLogger(__name__)
 
 DEFAULT_TARGET_ROLES = [
-    "Business Analyst Minería", "Analista Funcional Minería",
-    "Project Manager TI Minería", "Transformación Digital Minería",
-    "Coordinador Proyectos Tecnológicos Minería", "Especialista TI Minería",
-    "Ingeniero de Datos Minería", "Senior Business Analyst",
-    "IT Project Manager", "Analista de Procesos",
-    "Consultor de Automatización", "Especialista en IA y Datos",
-    "Business Process Consultant",
+    "Business Analyst Minería",
+    "Business Analyst Senior TI",
+    "Analista de Negocio Minería",
+    "Analista Funcional TI",
+    "Analista Funcional Banca Digital",
+    "Jefe de Proyectos TI",
+    "Project Manager TI Minería",
+    "PMO TI",
+    "Transformación Digital Minería",
+    "Analista de Procesos Minería",
+    "Product Owner Banca Digital",
+    "Product Owner IA",
+    "Especialista Tecnología Operacional Minera",
 ]
 DEFAULT_SOURCES = [
     "linkedin", "indeed", "google", "chiletrabajos", "computrabajo",

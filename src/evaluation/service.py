@@ -7,6 +7,7 @@ from src.config import get_settings
 from src.db.repository import upsert_job_offer, save_evaluation
 from src.evaluation.evaluator import evaluate_offer
 from src.search.retriever import retrieve_cv_evidence
+from src.search.processing import TARGET_STRATEGY
 
 
 def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
@@ -55,6 +56,7 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
             "filename": cv_version.get("source_filename"),
             "page_count": cv_version.get("page_count"),
             "char_count": cv_version.get("char_count"),
+            "target_strategy": TARGET_STRATEGY,
         },
         evidence,
     )
