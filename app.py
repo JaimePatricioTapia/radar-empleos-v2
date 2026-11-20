@@ -8,7 +8,7 @@ from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, run_discovery
-from src.search.processing import build_job_chunks, evaluate_top_offers, get_processing_status
+from src.search.processing import (MINIMUM_AFFINITY_SCORE, build_job_chunks, evaluate_top_offers, get_processing_status)
 from src.search.sources import SOURCE_REGISTRY
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
@@ -213,19 +213,20 @@ try:
         with st.spinner("Comparando similitud semántica y evaluando solo el top seleccionado..."):
             try:
                 eval_stats = evaluate_top_offers(client, user_id=user["id"], top_k=top_k)
-                c1, c2, c3 = st.columns(3)
+                c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Preseleccionadas", eval_stats["ranked"])
                 c2.metric("Evaluadas con Gemini", eval_stats["evaluated"])
-                c3.metric("Filtradas por preferencias", eval_stats["skipped_excluded"])
+                c3.metric("No recomendadas (<75%)", eval_stats["below_threshold"])
+                c4.metric("Excluidas por preferencias", eval_stats["skipped_excluded"])
                 if eval_stats["results"]:
-                    st.subheader("Mejores oportunidades evaluadas")
+                    st.subheader(f"Recomendaciones con afinidad ≥{MINIMUM_AFFINITY_SCORE}%")
                     for item in eval_stats["results"]:
                         with st.container(border=True):
                             st.markdown(f"**{item['title']}**")
                             st.write(
                                 f"{item.get('company') or 'Empresa no informada'} · "
                                 f"{item['sector_category']} · Afinidad **{item['affinity_score']}%** · "
-                                f"Prioridad **{item['priority_score']}/100**"
+                                f"Prioridad estratégica **{item['priority_score']}/100**"
                             )
                             st.caption(
                                 f"Veredicto: {item['verdict']} · "
@@ -233,6 +234,12 @@ try:
                             )
                             if item.get("source_url"):
                                 st.link_button("Abrir oferta original", item["source_url"])
+                elif eval_stats["below_threshold"]:
+                    st.info(
+                        f"Se evaluaron {eval_stats['evaluated']} ofertas. "
+                        f"{eval_stats['below_threshold']} quedaron fuera de recomendaciones "
+                        f"por tener afinidad inferior a {MINIMUM_AFFINITY_SCORE}%."
+                    )
                 if eval_stats["errors"]:
                     with st.expander(f"Incidencias ({len(eval_stats['errors'])})"):
                         for error in eval_stats["errors"]:
@@ -244,17 +251,35 @@ except Exception as exc:
 
 st.divider()
 st.header("📌 Bandeja priorizada")
-st.caption("Solo se muestran oportunidades nuevas. El orden usa prioridad estratégica y afinidad calculadas.")
+st.caption(
+    f"Solo se muestran ofertas NUEVAS con afinidad profesional igual o superior a "
+    f"{MINIMUM_AFFINITY_SCORE}%. El orden prioriza afinidad; el sector solo desempata."
+)
+sector_filter = st.selectbox(
+    "Filtro sectorial",
+    options=["Todos los sectores", "Solo minería"],
+    key="inbox_sector_filter",
+)
 try:
-    inbox = (client.table("job_offers")
-             .select("id,title,company,location,source,source_url,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
-             .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
-             .order("priority_score", desc=True).order("affinity_score", desc=True)
-             .limit(100).execute().data or [])
+    inbox_query = (client.table("job_offers")
+                   .select("id,title,company,location,source,source_url,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
+                   .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
+                   .gte("affinity_score", MINIMUM_AFFINITY_SCORE)
+                   .order("affinity_score", desc=True)
+                   .order("priority_score", desc=True))
+    if sector_filter == "Solo minería":
+        inbox_query = inbox_query.in_("sector_category", ["MINERIA", "PROVEEDOR_MINERO"])
+    inbox = inbox_query.limit(200).execute().data or []
     inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]
-    inbox.sort(key=lambda item: (item.get("priority_score") is not None, item.get("priority_score") or -1, item.get("affinity_score") or -1), reverse=True)
+    inbox.sort(
+        key=lambda item: (item.get("affinity_score") or -1, item.get("priority_score") or -1),
+        reverse=True,
+    )
     if not inbox:
-        st.info("Todavía no hay ofertas nuevas en la bandeja.")
+        if sector_filter == "Solo minería":
+            st.info(f"No hay ofertas mineras NUEVAS con afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%.")
+        else:
+            st.info(f"No hay ofertas NUEVAS con afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%. Prepare y evalúe más ofertas para ampliar las recomendaciones.")
     for item in inbox:
         with st.container(border=True):
             st.markdown(f"**{item['title']}**")
