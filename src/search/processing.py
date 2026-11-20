@@ -24,7 +24,7 @@ SECTOR_WEIGHTS = {
 # Exclusiones determinísticas para evitar gastar embeddings/Gemini en roles
 # que no corresponden a la trayectoria ni a los objetivos actuales.
 EXCLUDED_ROLE_TERMS = (
-    "scrum master", "practica profesional", "practicante", "internship",
+    "scrum master", "practica", "practica profesional", "practicante", "internship",
     "trainee", "prevencionista", "higiene ocupacional",
 )
 EXCLUDED_COMPANIES = ("banco santander", "santander chile")
@@ -118,8 +118,13 @@ def _excluded_reason(offer: dict) -> str | None:
     return None
 
 
+def meets_affinity_threshold(score: int | None) -> bool:
+    """Solo una afinidad laboral evaluada >=75 puede ser recomendada."""
+    return score is not None and int(score) >= MINIMUM_AFFINITY_SCORE
+
+
 def _priority_score(affinity: int, sector: str) -> int:
-    """Prioridad estratégica separada de la afinidad: 75% afinidad + 25% sector."""
+    """Prioridad estratégica informativa; nunca reemplaza el filtro de afinidad."""
     sector_weight = SECTOR_WEIGHTS.get(sector, 30)
     return max(0, min(100, int(0.75 * affinity + 0.25 * sector_weight + 0.5)))
 
@@ -288,7 +293,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "sector_category": sector, "raw_metadata": metadata,
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["evaluated"] += 1
-            if affinity < MINIMUM_AFFINITY_SCORE:
+            if not meets_affinity_threshold(affinity):
                 # Se conserva la evaluación para trazabilidad, pero no se presenta
                 # como recomendación ni vuelve a consumir Gemini.
                 stats["below_threshold"] += 1
