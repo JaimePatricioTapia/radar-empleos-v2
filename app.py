@@ -8,7 +8,7 @@ from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, run_discovery
-from src.search.processing import (MINIMUM_AFFINITY_SCORE, build_job_chunks, evaluate_top_offers, get_processing_status)
+from src.search.processing import (MINIMUM_AFFINITY_SCORE, build_job_chunks, classify_sector, evaluate_top_offers, get_processing_status)
 from src.search.sources import SOURCE_REGISTRY
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
@@ -188,7 +188,7 @@ try:
     m2.metric("Ofertas preparadas", processing["chunked_offers"])
     m3.metric("Pendientes de preparar", processing["pending_chunking"])
     m4.metric("Sin descripción suficiente", processing["needs_description"])
-    st.caption(f"Excluidas por preferencias (Scrum Master, Santander o salud): {processing['excluded_by_preferences']}")
+    st.caption(f"Excluidas por preferencias (Scrum Master, prácticas, prevención de riesgos, Santander o salud): {processing['excluded_by_preferences']}")
     chunk_limit = st.slider("Ofertas a preparar en este lote", 25, 200, 100, 25)
     if processing["pending_chunking"] > 0:
         if st.button("🧩 Preparar siguiente lote (sin Gemini)", type="primary"):
@@ -262,15 +262,19 @@ sector_filter = st.selectbox(
 )
 try:
     inbox_query = (client.table("job_offers")
-                   .select("id,title,company,location,source,source_url,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
+                   .select("id,title,company,location,source,source_url,description,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
                    .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
                    .gte("affinity_score", MINIMUM_AFFINITY_SCORE)
                    .order("affinity_score", desc=True)
                    .order("priority_score", desc=True))
-    if sector_filter == "Solo minería":
-        inbox_query = inbox_query.in_("sector_category", ["MINERIA", "PROVEEDOR_MINERO"])
-    inbox = inbox_query.limit(200).execute().data or []
+    inbox = inbox_query.limit(1000).execute().data or []
+    # Recalcular en memoria con el clasificador vigente para no depender de
+    # categorías antiguas que pudieron quedar mal asignadas.
+    for item in inbox:
+        item["sector_category"] = classify_sector(item)
     inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]
+    if sector_filter == "Solo minería":
+        inbox = [item for item in inbox if item["sector_category"] in ("MINERIA", "PROVEEDOR_MINERO")]
     inbox.sort(
         key=lambda item: (item.get("affinity_score") or -1, item.get("priority_score") or -1),
         reverse=True,
