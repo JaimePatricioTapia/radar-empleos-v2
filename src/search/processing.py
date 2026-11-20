@@ -12,6 +12,8 @@ from src.search.job_chunker import chunk_job_description
 
 logger = logging.getLogger(__name__)
 
+MINIMUM_AFFINITY_SCORE = 75
+
 SECTOR_WEIGHTS = {
     "MINERIA": 100,
     "PROVEEDOR_MINERO": 92,
@@ -19,30 +21,52 @@ SECTOR_WEIGHTS = {
     "BANCA_FINANZAS": 52,
     "OTROS": 30,
 }
-EXCLUDED_ROLE_TERMS = ("scrum master",)
+# Exclusiones determinísticas para evitar gastar embeddings/Gemini en roles
+# que no corresponden a la trayectoria ni a los objetivos actuales.
+EXCLUDED_ROLE_TERMS = (
+    "scrum master", "practica profesional", "practicante", "internship",
+    "trainee", "prevencionista", "higiene ocupacional",
+)
 EXCLUDED_COMPANIES = ("banco santander", "santander chile")
 HEALTH_TERMS = ("isapre", "clínica", "clinica", "hospital", "centro médico", "centro medico")
 
 
+def _normalize_text(value: str) -> str:
+    """Normaliza tildes y mayúsculas para clasificar texto en español."""
+    import unicodedata
+    normalized = unicodedata.normalize("NFKD", value or "")
+    return "".join(char for char in normalized if not unicodedata.combining(char)).lower()
+
+
 def classify_sector(offer: dict) -> str:
-    title = (offer.get("title") or "").lower()
-    company = (offer.get("company") or "").lower()
-    text = f"{title} {company} {(offer.get('description') or '')[:5000]}".lower()
-    mining_terms = ("minería", "mineria", "minera", "minero", "codelco", "bhp",
-                    "escondida", "collahuasi", "sqm", "teck", "antofagasta minerals",
-                    "chuquicamata", "el teniente", "faena", "rajo", "subterránea",
-                    "subterranea", "raise boring")
-    supplier_terms = ("proveedor", "contratista", "servicios mineros", "equipos mineros",
-                      "perforación", "perforacion", "maquinaria", "finning",
-                      "master drilling", "komatsu", "echeverría izquierdo")
-    bank_terms = ("banco", "banca", "financiero", "financiera", "fintech", "seguros",
-                  "medios de pago", "inversiones")
-    tech_terms = ("consultoría", "consultoria", "tecnología", "tecnologia", "software",
-                  "transformación digital", "transformacion digital", "sistemas")
-    if any(term in company or term in title for term in mining_terms):
-        return "MINERIA"
-    if any(term in text for term in mining_terms) and any(term in text for term in supplier_terms):
+    title = _normalize_text(offer.get("title") or "")
+    company = _normalize_text(offer.get("company") or "")
+    description = _normalize_text((offer.get("description") or "")[:5000])
+    text = f"{title} {company} {description}"
+
+    mining_terms = (
+        "mineria", "minera", "minero", "codelco", "bhp", "escondida",
+        "collahuasi", "sqm", "teck", "antofagasta minerals", "chuquicamata",
+        "el teniente", "faena minera", "rajo", "subterranea", "raise boring",
+        "concentradora", "relaves", "operaciones mina", "operacion minera",
+        "equipos mina", "flota minera",
+    )
+    supplier_terms = (
+        "proveedor", "contratista", "servicios mineros", "equipos mineros",
+        "perforacion", "maquinaria minera", "finning", "master drilling",
+        "komatsu", "echeverria izquierdo", "sandvik", "epiroc", "metso",
+        "hexagon", "rpmglobal", "hexagon mining",
+    )
+    bank_terms = ("banco", "banca", "financiero", "financiera", "fintech",
+                  "seguros", "medios de pago", "inversiones")
+    tech_terms = ("consultoria", "tecnologia", "software", "transformacion digital", "sistemas")
+
+    mining_context = any(term in text for term in mining_terms)
+    supplier_context = any(term in text for term in supplier_terms)
+    if mining_context and supplier_context:
         return "PROVEEDOR_MINERO"
+    if mining_context:
+        return "MINERIA"
     if any(term in company or term in title for term in bank_terms):
         return "BANCA_FINANZAS"
     if any(term in text for term in tech_terms):
@@ -51,13 +75,13 @@ def classify_sector(offer: dict) -> str:
 
 
 def _excluded_reason(offer: dict) -> str | None:
-    title = (offer.get("title") or "").lower()
-    company = (offer.get("company") or "").lower()
-    if any(term in title for term in EXCLUDED_ROLE_TERMS):
-        return "Cargo Scrum Master fuera de los objetivos actuales."
-    if any(term in company for term in EXCLUDED_COMPANIES):
+    title = _normalize_text(offer.get("title") or "")
+    company = _normalize_text(offer.get("company") or "")
+    if any(_normalize_text(term) in title for term in EXCLUDED_ROLE_TERMS):
+        return "Cargo fuera de los objetivos actuales (Scrum Master, práctica o prevención de riesgos)."
+    if any(_normalize_text(term) in company for term in EXCLUDED_COMPANIES):
         return "Empresa excluida de las preferencias actuales."
-    if any(term in f"{title} {company}" for term in HEALTH_TERMS):
+    if any(_normalize_text(term) in f"{title} {company}" for term in HEALTH_TERMS):
         return "Sector salud fuera de las preferencias actuales."
     return None
 
@@ -160,8 +184,10 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
     ranked = client.rpc("rank_job_offers_by_cv", {"match_limit": max(1, min(top_k, 100))}).execute().data or []
-    stats = {"ranked": len(ranked), "evaluated": 0, "skipped_existing": 0,
-             "skipped_excluded": 0, "errors": [], "results": []}
+    stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
+             "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
+             "skipped_existing": 0, "skipped_excluded": 0,
+             "errors": [], "results": []}
     for candidate in ranked:
         offer_id = candidate["job_offer_id"]
         previous = (client.table("evaluations").select("id")
@@ -229,6 +255,11 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "sector_category": sector, "raw_metadata": metadata,
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["evaluated"] += 1
+            if affinity < MINIMUM_AFFINITY_SCORE:
+                # Se conserva la evaluación para trazabilidad, pero no se presenta
+                # como recomendación ni vuelve a consumir Gemini.
+                stats["below_threshold"] += 1
+                continue
             stats["results"].append({
                 "id": offer_id, "title": offer["title"], "company": offer.get("company"),
                 "source_url": offer.get("source_url"), "affinity_score": affinity,
@@ -239,7 +270,11 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         except Exception as exc:
             logger.exception("Falló evaluación de oferta %s", offer_id)
             stats["errors"].append(f"{offer.get('title')}: {type(exc).__name__}: {exc}")
-    stats["results"].sort(key=lambda item: (item["priority_score"], item["affinity_score"]), reverse=True)
+    # La compatibilidad profesional manda; el sector solo desempata.
+    stats["results"].sort(
+        key=lambda item: (item["affinity_score"], item["priority_score"]),
+        reverse=True,
+    )
     return stats
 
 
