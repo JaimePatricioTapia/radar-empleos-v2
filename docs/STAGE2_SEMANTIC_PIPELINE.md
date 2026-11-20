@@ -14,15 +14,18 @@
 
 - `semantic_score`: similitud vectorial para ordenar candidatos antes de llamar a Gemini.
 - `affinity_score`: compatibilidad laboral evaluada por Gemini con evidencia del CV.
-- `priority_score`: prioridad estratégica para ordenar el trabajo de postulación. Fórmula actual: 75% afinidad + 25% ponderación sectorial (Minería 100, Proveedor minero 92, Tecnología/Consultoría 62, Banca/Finanzas 52, Otros 30).
+- `priority_score`: prioridad estratégica informativa. Fórmula: 75% afinidad + 25% ponderación sectorial (Minería 100, Proveedor minero 92, Tecnología/Consultoría 62, Banca/Finanzas 52, Otros 30).
 
-La prioridad no altera la afinidad. Los pesos son parámetros de producto que se podrán calibrar tras revisar los primeros resultados.
+**Regla de recomendaciones:** solo se muestran ofertas con `affinity_score >= 75`. La afinidad profesional ordena de mayor a menor; `priority_score` solo desempata. Las ofertas bajo 75 se conservan en la base y en el historial de evaluaciones, pero no aparecen como recomendaciones. Las ofertas sin evaluación tampoco aparecen en la bandeja priorizada.
+
+La bandeja incluye un filtro `Solo minería`, que considera las categorías `MINERIA` y `PROVEEDOR_MINERO`. La prioridad sectorial no puede elevar una oferta por debajo del umbral ni reemplazar la compatibilidad profesional.
 
 ## Preferencias aplicadas como filtros
 
-- No evaluar cargos Scrum Master.
+- No evaluar cargos Scrum Master, prácticas profesionales/internships/trainee, prevención de riesgos ni higiene ocupacional.
 - No priorizar Banco Santander.
 - No evaluar empresas del sector salud; una mención incidental a beneficios de salud en la descripción no excluye una oferta.
+- Clasificar como minería cuando el contexto minero aparezca en cargo, empresa o descripción; clasificar proveedor minero cuando además exista contexto de proveedor/contratista/equipos/servicios mineros.
 - Prioridad estratégica para Minería y Proveedor minero.
 - La evaluación puede reconocer la transferencia de experiencia operacional minera y experiencia tecnológica/funcional bancaria, pero no puede inventar experiencia o certificaciones.
 
