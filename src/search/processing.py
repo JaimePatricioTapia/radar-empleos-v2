@@ -30,6 +30,38 @@ EXCLUDED_ROLE_TERMS = (
 EXCLUDED_COMPANIES = ("banco santander", "santander chile")
 HEALTH_TERMS = ("isapre", "clínica", "clinica", "hospital", "centro médico", "centro medico")
 
+TARGET_STRATEGY = {
+    "target_roles": [
+        "Business Analyst", "Analista de Negocio", "Analista Funcional",
+        "Product Owner", "Product Manager digital", "IT Project Manager",
+        "PMO", "Jefe o Coordinador de Proyectos TI",
+        "Transformación Digital", "Procesos y Automatización",
+        "Tecnología y Datos aplicados a Minería",
+        "Operaciones y Sistemas Mineros",
+    ],
+    "priority_industries": [
+        "Minería", "Proveedores y servicios mineros",
+        "Tecnología y consultoría", "Banca y servicios financieros",
+    ],
+    "target_functions": [
+        "Análisis de negocio y levantamiento funcional",
+        "Implementación y mejora de sistemas",
+        "Gestión de proyectos tecnológicos",
+        "Transformación digital y optimización de procesos",
+        "Tecnología aplicada a operaciones mineras",
+        "Productos y canales digitales",
+    ],
+    "avoid_roles": [
+        "Scrum Master", "Prevencionista de Riesgos",
+        "Higiene Ocupacional", "Prácticas profesionales",
+        "Internship", "Trainee",
+    ],
+    "location_preferences": (
+        "Santiago y Región Metropolitana; otras regiones cuando el cargo "
+        "sea por turnos; modalidad remota aceptable."
+    ),
+}
+
 
 def _normalize_text(value: str) -> str:
     """Normaliza tildes y mayúsculas para clasificar texto en español."""
@@ -227,7 +259,8 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 {"cv_hash": cv_version["cv_hash"],
                  "filename": cv_version.get("source_filename"),
                  "page_count": cv_version.get("page_count"),
-                 "char_count": cv_version.get("char_count")},
+                 "char_count": cv_version.get("char_count"),
+                 "target_strategy": TARGET_STRATEGY},
                 evidence,
             )
             saved = save_evaluation(
