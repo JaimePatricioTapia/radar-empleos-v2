@@ -55,6 +55,7 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
             "filename": cv_version.get("source_filename"),
             "page_count": cv_version.get("page_count"),
             "char_count": cv_version.get("char_count"),
+            "target_strategy": TARGET_STRATEGY,
         },
         evidence,
     )
