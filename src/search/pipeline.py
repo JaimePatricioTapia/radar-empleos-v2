@@ -115,11 +115,12 @@ def run_full_search_pipeline(
         "batches": 0,
     }
     report("Etapa 3/3 · Comparando requisitos de las ofertas con evidencia del CV…")
+    evaluation_limit = max(1, min(int(evaluation_batch_size), 1000))
     while True:
         batch = evaluate_top_offers(
             client,
             user_id=user_id,
-            top_k=max(1, min(int(evaluation_batch_size), 1000)),
+            top_k=evaluation_limit,
         )
         evaluation["ranked"] += int(batch.get("ranked", 0))
         evaluation["evaluated"] += int(batch.get("evaluated", 0))
@@ -133,7 +134,7 @@ def run_full_search_pipeline(
             f"Evaluación: {evaluation['evaluated']} ofertas evaluadas; "
             f"{len(evaluation['errors'])} incidencias."
         )
-        if batch.get("errors") or int(batch.get("ranked", 0)) < evaluation_batch_size:
+        if batch.get("errors") or int(batch.get("ranked", 0)) < evaluation_limit:
             break
         if int(batch.get("evaluated", 0)) == 0:
             break
@@ -147,5 +148,9 @@ def run_full_search_pipeline(
         "preparation": preparation,
         "evaluation": evaluation,
         "processing_status": final_status,
-        "completed": not evaluation["errors"] and preparation["pending_remaining"] == 0,
+        "completed": (
+            not evaluation["errors"]
+            and preparation["pending_remaining"] == 0
+            and int(discovery.get("errors", 0)) == 0
+        ),
     }
