@@ -7,7 +7,7 @@ from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
-from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, run_discovery
+from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
 from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
 from src.search.pipeline import run_full_search_pipeline
 from src.search.sources import SOURCE_REGISTRY
@@ -208,7 +208,7 @@ if run_pipeline:
                 for error in discovery["error_details"]:
                     st.write(f"- {error}")
         st.success(
-            "La bandeja priorizada se actualizó con las ofertas que alcanzan el 85%."
+            f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
             if result["completed"]
             else "Los resultados parciales quedaron guardados. Revise las incidencias antes de reintentar."
         )
