@@ -46,6 +46,7 @@ def test_full_pipeline_runs_discovery_preparation_until_empty_and_evaluation():
             {"pending_chunking": 1},
             {"pending_chunking": 0},
             {"pending_chunking": 0},
+            {"pending_chunking": 0},
         ]),
         patch.object(pipeline, "build_job_chunks", side_effect=[
             {"offers_chunked": 1, "chunks_saved": 3, "insufficient": 0, "excluded": 0},
@@ -99,3 +100,11 @@ def test_full_pipeline_stops_if_chunking_does_not_make_progress():
                 client, user_id="user-1",
                 roles=["Business Analyst"], sources=["linkedin"],
             )
+
+
+def test_affinity_recommendation_threshold_is_85():
+    from src.search.processing import meets_affinity_threshold
+
+    assert meets_affinity_threshold(85) is True
+    assert meets_affinity_threshold(84) is False
+    assert meets_affinity_threshold(None) is False
