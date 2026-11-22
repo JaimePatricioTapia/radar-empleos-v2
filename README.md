@@ -19,10 +19,14 @@ Nueva versión independiente del Radar de Empleos. Este repositorio no modifica 
 - Persistencia de versiones del CV, fragmentos, ofertas y evaluaciones: implementada.
 - Seguridad RLS: habilitada en las siete tablas.
 - Recuperación semántica pgvector del CV: implementada.
-- Autenticación, ingesta local del CV y evaluación manual: implementadas.
+- Autenticación, carga de CV desde navegador con procesamiento temporal y evaluación manual: implementadas en la rama cloud; pendientes de prueba integrada.
 - Etapa 1 — búsqueda automática multifuente: implementada.
 - Etapa 2 — fragmentación y embeddings de ofertas, preselección semántica pgvector, recuperación de evidencia CV sin embeddings extra, evaluación Gemini por lotes y ranking sectorial: implementada en la rama feature/semantic-evaluation-ranking; pendiente validación integrada local.
 - Historial de estados: 59 postuladas + 220 descartadas migradas desde el Radar anterior; estados históricos auditables.
+
+## Despliegue Streamlit Community Cloud
+
+Consulte [docs/DEPLOY_STREAMLIT_CLOUD.md](docs/DEPLOY_STREAMLIT_CLOUD.md). El repositorio debe permanecer privado y los secretos se configuran en la plataforma.
 
 ## Inicio local
 
@@ -37,7 +41,7 @@ El esquema reproducible está en supabase/schema.sql. Aplicar SOLO en el proyect
 - Mantener el repositorio privado.
 - No versionar CV, postulaciones, cachés, archivos .env, service-role keys ni sesiones.
 - La app usa sesión autenticada y políticas RLS; nunca exponer una clave privilegiada.
-- El PDF original permanece local; no se sube a GitHub ni a Supabase.
+- El PDF original no se sube a GitHub ni se persiste en Supabase. En Streamlit Cloud se transmite para procesarlo en un archivo temporal del servidor, eliminado al finalizar; solo se persisten los datos derivados bajo RLS.
 
 ## Principio de evaluación
 
