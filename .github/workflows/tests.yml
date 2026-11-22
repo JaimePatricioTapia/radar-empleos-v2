@@ -6,11 +6,13 @@ on:
       - main
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
+      - feature/one-click-search-85-affinity
   pull_request:
     branches:
       - main
       - feature/multisource-job-discovery-stage1
       - feature/semantic-evaluation-ranking
+      - feature/affinity-threshold-mining-filter
 
 jobs:
   unit-tests:
