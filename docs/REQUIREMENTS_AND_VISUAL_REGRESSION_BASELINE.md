@@ -59,7 +59,7 @@ Toda modificación debe:
 | RF-004 | Búsqueda multifuente | Permite seleccionar portales y cargos, ejecutar consultas, informar resultados, duplicados y errores. | Alta |
 | RF-005 | Preparación semántica | Permite preparar ofertas por lotes sin ejecutar la evaluación generativa de Gemini. | Alta |
 | RF-006 | Evaluación de afinidad | Evalúa ofertas con evidencia recuperada del CV y conserva trazabilidad del resultado. | Alta |
-| RF-007 | Umbral de recomendación | Solo se muestran como recomendadas las ofertas con afinidad >= 75%. | Alta |
+| RF-007 | Umbral de recomendación | Solo se muestran como recomendadas las ofertas con afinidad >= 85%, calculada contrastando requisitos de la oferta con evidencia verificable del CV. | Alta |
 | RF-008 | Orden de recomendaciones | Se ordenan por afinidad descendente; el sector solo desempata. | Alta |
 | RF-009 | Filtro minero | Permite alternar entre todos los sectores y solo minería/proveedores mineros. | Alta |
 | RF-010 | Clasificación rápida | Cada oferta permite cambiar su estado mediante acciones visibles: Postulado, Descartado, Caducado y Error. | Crítica |
@@ -69,6 +69,8 @@ Toda modificación debe:
 | RF-014 | Evaluación manual | Se puede pegar una oferta externa y solicitar evaluación sin ejecutar una búsqueda. | Media |
 | RF-015 | Passkeys | Un usuario puede registrar y usar una Passkey, manteniendo alternativa de acceso. | Alta |
 | RF-016 | Auditoría | Cada versión registra requisitos afectados, pruebas, evidencias visuales y resultado de regresión. | Alta |
+| RF-017 | Ejecución integral con una acción | Un único botón inicia búsqueda multifuente, preparación semántica, evaluación de afinidad y actualización de la bandeja priorizada, sin exigir acciones manuales intermedias. | Crítica |
+| RF-018 | Continuidad y recuperación del proceso | El flujo integral procesa por lotes hasta agotar ofertas elegibles, conserva resultados parciales, evita duplicados y permite reanudar desde la etapa pendiente si ocurre un error. | Alta |
 
 ## 4. Requisitos de clasificación de ofertas
 
@@ -88,7 +90,7 @@ La acción **Descartado** debe permitir registrar un motivo opcional. Las accion
 - Las ofertas clasificadas no deben desaparecer de la base ni perder su historial.
 - Debe existir una vista o filtro para consultar ofertas Postuladas, Descartadas, Caducadas y con Error.
 - El filtro sectorial no debe cambiar ni borrar el estado de una oferta.
-- Una oferta con afinidad inferior al 75% no debe aparecer como recomendación; su registro histórico se conserva según las reglas de trazabilidad.
+- Una oferta con afinidad inferior al 85% no debe aparecer como recomendación; su registro histórico se conserva según las reglas de trazabilidad.
 
 ### 4.3 Criterio de no regresión
 Cambiar el selector de estado por botones, o viceversa, no se considera equivalente sin validación del propietario. La clasificación rápida es una función explícita y debe mantenerse visible.
@@ -101,9 +103,9 @@ La siguiente lista es el inventario funcional que debe tener evidencia visual. L
 |---|---|---|
 | VIS-001 | Acceso | Inicio de sesión y creación de cuenta. |
 | VIS-002 | Mi currículum | Ruta/selección de CV, estado procesado y resultado. No mostrar contenido sensible en capturas compartidas. |
-| VIS-003 | Búsqueda multifuente | Portales, cargos, límite, botón de ejecución y resultados. |
-| VIS-004 | Preparación semántica | Métricas, tamaño del lote y botón preparar siguiente lote. |
-| VIS-005 | Evaluación Gemini | Top-K, botón de evaluación, métricas y errores. |
+| VIS-003 | Búsqueda integral | Portales, cargos, límite y un único botón que inicia el flujo completo; progreso por etapas y resultados finales. |
+| VIS-004 | Preparación semántica | Progreso y métricas de preparación integrados al flujo automático; no requiere botón independiente. |
+| VIS-005 | Evaluación de afinidad | Progreso, métricas, errores y resultados de evaluación integrados al flujo automático; no requiere botón independiente. |
 | VIS-006 | Bandeja priorizada | Tarjeta completa de oferta, afinidad, prioridad, URL y acciones de clasificación. |
 | VIS-007 | Filtro de minería | Estado visual con todos los sectores y solo minería. |
 | VIS-008 | Historial | Ofertas clasificadas por estado y sus notas. |
@@ -132,8 +134,8 @@ Las capturas deben:
 | QA-003 | Ejecutar búsqueda multifuente | Se informan encontradas, nuevas, duplicadas y errores. |
 | QA-004 | Preparar siguiente lote | Se generan chunks/embeddings; no se llama al evaluador Gemini. |
 | QA-005 | Evaluar ofertas | Se evalúa el lote configurado y se registra trazabilidad. |
-| QA-006 | Afinidad 74% | No aparece en recomendaciones. |
-| QA-007 | Afinidad 75% | Sí puede aparecer en recomendaciones. |
+| QA-006 | Afinidad 84% | No aparece en recomendaciones. |
+| QA-007 | Afinidad 85% | Sí puede aparecer en recomendaciones si existe evidencia suficiente y no aplica una exclusión. |
 | QA-008 | Ordenar recomendaciones | Afinidad descendente; sector no adelanta menor afinidad. |
 | QA-009 | Filtro solo minería | Solo MINERIA y PROVEEDOR_MINERO. |
 | QA-010 | Clasificar como Postulado | Estado persistido y aplicación asociada creada/actualizada. |
@@ -144,6 +146,9 @@ Las capturas deben:
 | QA-015 | Cancelar Passkey o no disponer de ella | No se bloquea el acceso alternativo. |
 | QA-016 | Revisión visual | Las pantallas no afectadas conservan estructura y controles de referencia. |
 | QA-017 | Repositorio/despliegue | Repositorio privado; usuario final no puede modificar código ni secretos. |
+| QA-018 | Ejecución integral | Una sola acción ejecuta búsqueda, preparación, evaluación y refresco de la bandeja sin botones intermedios. | Crítica |
+| QA-019 | Reanudación y no duplicación | Ante un fallo, los resultados ya guardados se conservan; al reintentar no se duplican ofertas ni se pierde el progreso y se continúa con las pendientes. | Alta |
+| QA-020 | Evaluación requisito-CV | La puntuación distingue requisitos obligatorios/deseables, evidencia directa/transferible y brechas; no atribuye al CV competencias no demostradas. | Crítica |
 
 ## 7. Procedimiento de auditoría visual por versión
 
@@ -180,13 +185,21 @@ Mantener un registro por cambio con esta estructura:
 ## 9. Estado de implementación al crear esta línea base
 
 - Búsqueda multifuente, preparación semántica y evaluación por lotes: presentes en la rama de afinidad.
-- Umbral de afinidad >=75%, orden por afinidad y filtro minero: incorporados en la rama de afinidad, pendientes de validación funcional del usuario.
+- Umbral de afinidad >=85%, orden por afinidad y filtro minero: cambio aprobado el 2026-11-21; implementación y validación pendientes.
 - Clasificación de ofertas: existe actualmente un selector de estado con botón «Guardar estado» en cada tarjeta. El usuario reporta que echa de menos la botonera de clasificación rápida; la restauración de acciones directas y la vista de historial quedan como trabajo pendiente.
 - Passkeys: trabajo separado en rama propia; no se considera implementado.
 - Capturas visuales aprobadas: pendientes de levantar desde la aplicación real.
 - Acceso público autenticado con datos privados por usuario: decisión de arquitectura acordada; requiere prueba de aislamiento multiusuario y protección del despliegue antes de abrir registros a terceros.
 
-## 10. Regla de aprobación
+## 10. Registro incremental de cambios aprobados
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-001 | 2026-11-21 | RF-007, RF-017, RF-018, VIS-003–VIS-005, QA-006–QA-007, QA-018–QA-020 | El propietario autorizó elevar el umbral de recomendación de 75% a 85% y consolidar búsqueda, preparación semántica y evaluación en una única acción con continuidad y recuperación. | Aprobado para implementación; pendiente de código y pruebas. |
+
+Las nuevas decisiones se agregan como filas; no se sobrescriben decisiones históricas. Toda modificación futura de este documento requiere presentar previamente la propuesta al propietario y esperar su autorización explícita.
+
+## 11. Regla de aprobación
 
 Una versión solo se considera lista para integrar cuando:
 - las pruebas automatizadas pasan;
