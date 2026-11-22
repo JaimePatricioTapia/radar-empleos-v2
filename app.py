@@ -1,11 +1,11 @@
-"""Interfaz Radar 2.0: Auth, CV local, búsqueda automática y evaluación manual."""
+"""Interfaz Radar 2.0: Auth, CV seguro, búsqueda automática y evaluación manual."""
 from __future__ import annotations
 
 import streamlit as st
 
 from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
-from src.cv.service import ingest_cv
+from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
 from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
@@ -17,12 +17,15 @@ st.title("Radar de Empleos 2.0")
 st.caption("Buscador multifuente y evaluador inteligente · Entorno independiente de desarrollo")
 
 settings = get_settings()
-try:
-    client = get_supabase_client()
-except Exception as exc:
-    st.error(f"No se pudo configurar Supabase: {exc}")
-    st.info("Revise SUPABASE_URL y SUPABASE_KEY en su archivo .env.")
-    st.stop()
+if "supabase_client" not in st.session_state:
+    try:
+        # Cada sesión de Streamlit conserva su propio cliente y estado Auth.
+        st.session_state.supabase_client = get_supabase_client()
+    except Exception as exc:
+        st.error(f"No se pudo configurar Supabase: {type(exc).__name__}.")
+        st.info("Configure SUPABASE_URL y SUPABASE_KEY en los secretos de Streamlit Cloud o en .env local.")
+        st.stop()
+client = st.session_state.supabase_client
 
 if "radar_user" not in st.session_state:
     st.session_state.radar_user = None
@@ -75,24 +78,22 @@ with st.sidebar:
             client.auth.sign_out()
         finally:
             st.session_state.radar_user = None
+            st.session_state.pop("supabase_client", None)
             st.rerun()
 
 st.subheader("Mi currículum")
-st.write("El PDF se procesa desde su computador. Solo se guardan el texto extraído, sus fragmentos y embeddings; el archivo original no se sube.")
-cv_path = st.text_input("Ruta local del PDF", value=settings.cv_pdf_path or "", placeholder="/Users/usuario/Documents/CV.pdf")
-if st.button("Procesar mi CV", type="primary", disabled=not cv_path.strip()):
+st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")
+uploaded_cv = st.file_uploader("Seleccionar CV (PDF, máximo 15 MB)", type=["pdf"], key="cv_pdf_upload")
+if st.button("Procesar mi CV", type="primary", disabled=uploaded_cv is None):
     with st.spinner("Leyendo CV, generando embeddings y guardando información..."):
         try:
-            result = ingest_cv(cv_path.strip(), client=client, user_id=user["id"])
+            result = ingest_cv_upload(uploaded_cv.getvalue(), uploaded_cv.name, client=client, user_id=user["id"])
             st.success("CV procesado y guardado correctamente.")
             st.metric("Fragmentos guardados", result["chunk_count"])
             st.caption(f"Versión: {result['cv_version_id']} · Modelo: {result['embedding_model']}")
             st.caption(f"SHA-256: {result['cv_hash']}")
-        except FileNotFoundError:
-            st.error("No se encontró el PDF. Revise la ruta local.")
         except Exception as exc:
-            st.error(f"No se pudo procesar el CV: {exc}")
-
+            st.error(f"No se pudo procesar el CV: {type(exc).__name__}: {exc}")
 st.divider()
 st.header("🔎 Búsqueda y evaluación automática")
 st.write(
