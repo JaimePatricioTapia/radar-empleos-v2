@@ -95,7 +95,7 @@ def test_full_pipeline_stops_if_chunking_does_not_make_progress():
             "offers_chunked": 0, "chunks_saved": 0,
         }),
     ):
-        with pytest.raises(RuntimeError, match="no avanz"):
+        with pytest.raises(RuntimeError, match="sin avanzar"):
             pipeline.run_full_search_pipeline(
                 client, user_id="user-1",
                 roles=["Business Analyst"], sources=["linkedin"],
