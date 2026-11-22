@@ -1,4 +1,4 @@
-name: Python tests # includes the one-click search pipeline branch
+name: Python tests
 
 on:
   push:
@@ -7,7 +7,6 @@ on:
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
       - feature/one-click-search-85-affinity
-      - feature/one-click-search-85-affinity
       - feature/streamlit-cloud-deployment
   pull_request:
     branches:
@@ -15,6 +14,7 @@ on:
       - feature/multisource-job-discovery-stage1
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
+      - feature/one-click-search-85-affinity
 
 jobs:
   unit-tests:
