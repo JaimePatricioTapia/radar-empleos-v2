@@ -111,6 +111,8 @@ La siguiente lista es el inventario funcional que debe tener evidencia visual. L
 | VIS-008 | Historial | Ofertas clasificadas por estado y sus notas. |
 | VIS-009 | Evaluación manual | Formulario y resultado de evaluación. |
 | VIS-010 | Passkeys | Registro, acceso con Passkey y alternativa de acceso. |
+| VIS-011 | Ejecución cloud | Aplicación iniciada desde la URL Streamlit, pantalla de acceso y estado de servicio sin revelar secretos. |
+| VIS-012 | Carga cloud del CV | Selector de archivo PDF, confirmación de procesamiento y resultado; no mostrar contenido sensible ni ruta del servidor. |
 
 ### 5.1 Capturas de referencia
 Guardar capturas aprobadas en `docs/visual-baseline/` con nombres estables:
@@ -149,6 +151,10 @@ Las capturas deben:
 | QA-018 | Ejecución integral | Una sola acción ejecuta búsqueda, preparación, evaluación y refresco de la bandeja sin botones intermedios. | Crítica |
 | QA-019 | Reanudación y no duplicación | Ante un fallo, los resultados ya guardados se conservan; al reintentar no se duplican ofertas ni se pierde el progreso y se continúa con las pendientes. | Alta |
 | QA-020 | Evaluación requisito-CV | La puntuación distingue requisitos obligatorios/deseables, evidencia directa/transferible y brechas; no atribuye al CV competencias no demostradas. | Crítica |
+| QA-021 | Secretos de despliegue | La app inicia con secretos de Streamlit; ninguna clave aparece en Git, HTML, mensajes de error ni logs de interfaz. | Crítica |
+| QA-022 | Sesiones concurrentes A/B | Dos usuarios autenticados en sesiones distintas no comparten tokens, identidad ni datos; RLS limita cada consulta a auth.uid(). | Crítica |
+| QA-023 | Ingesta de CV cloud | Un PDF válido se procesa y activa solo para el usuario autenticado; un PDF inválido falla de forma controlada y los temporales se eliminan. | Crítica |
+| QA-024 | Smoke test Community Cloud | La rama y entrypoint seleccionados instalan dependencias, arrancan la app y permiten autenticación, carga CV y consulta inicial de bandeja. | Alta |
 
 ## 7. Procedimiento de auditoría visual por versión
 
@@ -196,6 +202,7 @@ Mantener un registro por cambio con esta estructura:
 | ID | Fecha | Requisitos | Decisión autorizada | Estado |
 |---|---|---|---|---|
 | CHG-2026-001 | 2026-11-21 | RF-007, RF-017, RF-018, VIS-003–VIS-005, QA-006–QA-007, QA-018–QA-020 | El propietario autorizó elevar el umbral de recomendación de 75% a 85% y consolidar búsqueda, preparación semántica y evaluación en una única acción con continuidad y recuperación. | Aprobado para implementación; pendiente de código y pruebas. |
+| CHG-2026-002 | 2026-11-22 | RF-019–RF-022, VIS-011–VIS-012, QA-021–QA-024 | El propietario autorizó preparar Radar 2.0 para Streamlit Community Cloud, mantener GitHub privado, procesar CV mediante carga temporal y aislar clientes de Supabase por sesión. No autoriza hacer público el repositorio ni cambiar el esquema de Supabase. | Aprobado para implementación; pendiente de pruebas integradas y autorización GitHub/Streamlit. |
 
 Las nuevas decisiones se agregan como filas; no se sobrescriben decisiones históricas. Toda modificación futura de este documento requiere presentar previamente la propuesta al propietario y esperar su autorización explícita.
 
