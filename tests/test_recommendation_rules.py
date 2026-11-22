@@ -6,11 +6,11 @@ from src.search.processing import (
 )
 
 
-def test_recommendations_require_at_least_75_percent():
-    assert MINIMUM_AFFINITY_SCORE == 75
-    assert meets_affinity_threshold(75)
+def test_recommendations_require_at_least_85_percent():
+    assert MINIMUM_AFFINITY_SCORE == 85
+    assert meets_affinity_threshold(85)
     assert meets_affinity_threshold(100)
-    assert not meets_affinity_threshold(74)
+    assert not meets_affinity_threshold(84)
     assert not meets_affinity_threshold(None)
 
 

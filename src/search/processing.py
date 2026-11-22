@@ -12,7 +12,7 @@ from src.search.job_chunker import chunk_job_description
 
 logger = logging.getLogger(__name__)
 
-MINIMUM_AFFINITY_SCORE = 75
+MINIMUM_AFFINITY_SCORE = 85
 
 SECTOR_WEIGHTS = {
     "MINERIA": 100,
@@ -119,7 +119,7 @@ def _excluded_reason(offer: dict) -> str | None:
 
 
 def meets_affinity_threshold(score: int | None) -> bool:
-    """Solo una afinidad laboral evaluada >=75 puede ser recomendada."""
+    """Solo una afinidad laboral evaluada >=85 puede ser recomendada."""
     return score is not None and int(score) >= MINIMUM_AFFINITY_SCORE
 
 
@@ -220,7 +220,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
     if not cv_rows:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
-    ranked = client.rpc("rank_job_offers_by_cv", {"match_limit": max(1, min(top_k, 100))}).execute().data or []
+    ranked = client.rpc("rank_job_offers_by_cv", {"match_limit": max(1, min(top_k, 1000))}).execute().data or []
     stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
              "skipped_existing": 0, "skipped_excluded": 0,

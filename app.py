@@ -7,8 +7,9 @@ from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
 from src.cv.service import ingest_cv
 from src.db.client import get_supabase_client
-from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, run_discovery
-from src.search.processing import (MINIMUM_AFFINITY_SCORE, build_job_chunks, classify_sector, evaluate_top_offers, get_processing_status)
+from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
+from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
+from src.search.pipeline import run_full_search_pipeline
 from src.search.sources import SOURCE_REGISTRY
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
@@ -93,11 +94,16 @@ if st.button("Procesar mi CV", type="primary", disabled=not cv_path.strip()):
             st.error(f"No se pudo procesar el CV: {exc}")
 
 st.divider()
-st.header("🔎 Búsqueda automática de empleos")
+st.header("🔎 Búsqueda y evaluación automática")
 st.write(
-    "Radar consulta portales y buscadores laborales, normaliza los avisos, elimina duplicados "
-    "y guarda las oportunidades encontradas en su espacio privado. En esta etapa no consume "
-    "Gemini para evaluar cada aviso; primero construimos una base limpia de oportunidades."
+    "Una sola acción consulta los portales seleccionados, guarda las ofertas nuevas, "
+    "prepara sus descripciones y embeddings, las compara con la evidencia de su CV "
+    "y actualiza la bandeja priorizada. No necesita ejecutar etapas intermedias."
+)
+st.info(
+    f"Umbral de recomendación: **{MINIMUM_AFFINITY_SCORE}%**. "
+    "La afinidad se calcula contrastando los requisitos de cada oferta con evidencia "
+    "verificable del currículum; las brechas no demostradas no se dan por cumplidas."
 )
 st.warning(
     "La cobertura depende de la disponibilidad y estructura de cada portal. "
@@ -116,138 +122,100 @@ selected_roles = st.multiselect(
     options=DEFAULT_TARGET_ROLES,
     default=DEFAULT_TARGET_ROLES,
 )
-limit_per_query = st.slider("Máximo de resultados por cargo y portal", min_value=5, max_value=30, value=10, step=5)
-
-estimated_queries = len(selected_sources) * len(selected_roles)
-st.caption(f"Este barrido ejecutará hasta {estimated_queries} consultas. Cada portal puede devolver menos resultados.")
-run_search = st.button(
-    "🚀 Ejecutar búsqueda multifuente",
-    type="primary",
-    disabled=not selected_sources or not selected_roles,
+limit_per_query = st.slider(
+    "Máximo de resultados por cargo y portal",
+    min_value=5,
+    max_value=30,
+    value=10,
+    step=5,
 )
-if run_search:
-    status = st.status("Iniciando rastreo de portales…", expanded=True)
+estimated_queries = len(selected_sources) * len(selected_roles)
+st.caption(f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda.")
+
+try:
+    active_cv = (
+        client.table("cv_versions")
+        .select("id")
+        .eq("user_id", user["id"])
+        .eq("is_active", True)
+        .limit(1)
+        .execute()
+        .data
+        or []
+    )
+except Exception as exc:
+    active_cv = []
+    st.error(f"No se pudo verificar el currículum activo: {exc}")
+
+if not active_cv:
+    st.warning("Antes de iniciar, procese su currículum en la sección «Mi currículum».")
+
+run_pipeline = st.button(
+    "🚀 Buscar y evaluar ofertas automáticamente",
+    type="primary",
+    disabled=not selected_sources or not selected_roles or not active_cv,
+    use_container_width=True,
+)
+if run_pipeline:
+    status = st.status("Iniciando búsqueda integral…", expanded=True)
     progress_line = st.empty()
     try:
-        def report_progress(message: str):
-            progress_line.write(message)
-        result = run_discovery(
-            client, user_id=user["id"], roles=selected_roles,
-            sources=selected_sources, limit_per_query=limit_per_query,
-            progress=report_progress,
+        result = run_full_search_pipeline(
+            client,
+            user_id=user["id"],
+            roles=selected_roles,
+            sources=selected_sources,
+            limit_per_query=limit_per_query,
+            progress=lambda message: progress_line.write(message),
         )
-        status.update(label="Búsqueda finalizada", state="complete", expanded=False)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Ofertas encontradas", result["total_found"])
-        c2.metric("Nuevas guardadas", result["saved"])
-        c3.metric("Duplicadas", result["duplicates"])
-        c4.metric("Errores", result["errors"])
+        discovery = result["discovery"]
+        preparation = result["preparation"]
+        evaluation = result["evaluation"]
+        status.update(
+            label="Proceso integral finalizado" if result["completed"] else "Proceso finalizado con incidencias",
+            state="complete" if result["completed"] else "error",
+            expanded=not result["completed"],
+        )
+        st.subheader("Resumen de esta ejecución")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Ofertas encontradas", discovery["total_found"])
+        c2.metric("Nuevas guardadas", discovery["saved"])
+        c3.metric("Ofertas preparadas", preparation["offers_chunked"])
+        c4.metric("Evaluadas con Gemini", evaluation["evaluated"])
+        c5.metric(f"Recomendables ≥{MINIMUM_AFFINITY_SCORE}%", len(evaluation["results"]))
+        st.caption(
+            f"Duplicadas: {discovery['duplicates']} · "
+            f"Descripciones insuficientes: {preparation['insufficient']} · "
+            f"Excluidas por preferencias: {preparation['excluded']} · "
+            f"Evaluaciones bajo el umbral: {evaluation['below_threshold']}"
+        )
+        st.caption(
+            f"Lotes de preparación: {preparation['batches']} · "
+            f"Lotes de evaluación: {evaluation['batches']} · "
+            f"Ofertas pendientes de preparación: {preparation['pending_remaining']}"
+        )
         st.subheader("Resultado por portal")
-        for source, values in result["by_source"].items():
-            label = source_labels.get(source, source)
+        for source, values in discovery["by_source"].items():
             st.write(
-                f"**{label}:** {values['found']} encontradas · "
+                f"**{source_labels.get(source, source)}:** {values['found']} encontradas · "
                 f"{values['saved']} nuevas · {values['duplicates']} duplicadas · "
                 f"{values['errors']} errores"
             )
-        if result["offers"]:
-            st.subheader("Ofertas nuevas capturadas")
-            for offer in result["offers"]:
-                title = offer.get("title") or "Sin título"
-                company = offer.get("company") or "Empresa no informada"
-                location = offer.get("location") or "Ubicación no informada"
-                with st.container(border=True):
-                    st.markdown(f"**{title}**")
-                    st.caption(f"{company} · {location} · {source_labels.get(offer.get('source'), offer.get('source'))}")
-                    if offer.get("source_url"):
-                        st.link_button("Abrir oferta original", offer["source_url"])
-        if result["error_details"]:
-            with st.expander(f"Ver {len(result['error_details'])} incidencias de los portales"):
-                for detail in result["error_details"]:
-                    st.write(f"- {detail}")
-        st.info(
-            "Las ofertas ya están guardadas, pero aún no tienen puntuación de compatibilidad. "
-            "La siguiente etapa conectará estos registros con embeddings de ofertas, pgvector y Gemini."
+        if evaluation["errors"] or discovery["error_details"]:
+            with st.expander("Ver incidencias del proceso"):
+                for error in evaluation["errors"]:
+                    st.write(f"- {error}")
+                for error in discovery["error_details"]:
+                    st.write(f"- {error}")
+        st.success(
+            f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
+            if result["completed"]
+            else "Los resultados parciales quedaron guardados. Revise las incidencias antes de reintentar."
         )
     except Exception as exc:
-        status.update(label="La búsqueda no pudo completarse", state="error")
-        st.error(f"Error ejecutando la búsqueda: {exc}")
-
-
-st.divider()
-st.header("🧠 Preparación semántica y evaluación")
-st.write(
-    "Primero procesamos las ofertas en lotes y comparamos sus fragmentos con los del CV. "
-    "Gemini no se ejecuta durante esta preparación: solo se activa cuando todas las ofertas "
-    "con descripción suficiente ya están vectorizadas."
-)
-try:
-    processing = get_processing_status(client, user_id=user["id"])
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Ofertas nuevas", processing["new_offers"])
-    m2.metric("Ofertas preparadas", processing["chunked_offers"])
-    m3.metric("Pendientes de preparar", processing["pending_chunking"])
-    m4.metric("Sin descripción suficiente", processing["needs_description"])
-    st.caption(f"Excluidas por preferencias (Scrum Master, prácticas, prevención de riesgos, Santander o salud): {processing['excluded_by_preferences']}")
-    chunk_limit = st.slider("Ofertas a preparar en este lote", 25, 200, 100, 25)
-    if processing["pending_chunking"] > 0:
-        if st.button("🧩 Preparar siguiente lote (sin Gemini)", type="primary"):
-            with st.spinner("Fragmentando ofertas y generando embeddings..."):
-                result = build_job_chunks(client, user_id=user["id"], limit=chunk_limit)
-            st.success(
-                f"Lote procesado: {result['offers_chunked']} ofertas y "
-                f"{result['chunks_saved']} fragmentos vectorizados."
-            )
-            st.caption(f"Descripciones insuficientes: {result['insufficient']} · Filtradas por preferencias: {result['excluded']}")
-            st.rerun()
-    elif processing["chunked_offers"] > 0:
-        st.success("Todas las ofertas con descripción suficiente ya están preparadas.")
-    if processing["needs_description"] > 0:
-        st.warning(
-            f"{processing['needs_description']} ofertas no se evaluarán todavía porque "
-            "su descripción es demasiado corta o incompleta."
-        )
-    top_k = st.slider("Máximo de ofertas que recibirá Gemini", 10, 100, 35, 5)
-    can_evaluate = processing["pending_chunking"] == 0 and processing["chunked_offers"] > 0
-    if st.button("🎯 Evaluar las mejores ofertas con Gemini", type="primary", disabled=not can_evaluate):
-        with st.spinner("Comparando similitud semántica y evaluando solo el top seleccionado..."):
-            try:
-                eval_stats = evaluate_top_offers(client, user_id=user["id"], top_k=top_k)
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("Preseleccionadas", eval_stats["ranked"])
-                c2.metric("Evaluadas con Gemini", eval_stats["evaluated"])
-                c3.metric("No recomendadas (<75%)", eval_stats["below_threshold"])
-                c4.metric("Excluidas por preferencias", eval_stats["skipped_excluded"])
-                if eval_stats["results"]:
-                    st.subheader(f"Recomendaciones con afinidad ≥{MINIMUM_AFFINITY_SCORE}%")
-                    for item in eval_stats["results"]:
-                        with st.container(border=True):
-                            st.markdown(f"**{item['title']}**")
-                            st.write(
-                                f"{item.get('company') or 'Empresa no informada'} · "
-                                f"{item['sector_category']} · Afinidad **{item['affinity_score']}%** · "
-                                f"Prioridad estratégica **{item['priority_score']}/100**"
-                            )
-                            st.caption(
-                                f"Veredicto: {item['verdict']} · "
-                                f"Similitud semántica previa: {item.get('semantic_similarity')}"
-                            )
-                            if item.get("source_url"):
-                                st.link_button("Abrir oferta original", item["source_url"])
-                elif eval_stats["below_threshold"]:
-                    st.info(
-                        f"Se evaluaron {eval_stats['evaluated']} ofertas. "
-                        f"{eval_stats['below_threshold']} quedaron fuera de recomendaciones "
-                        f"por tener afinidad inferior a {MINIMUM_AFFINITY_SCORE}%."
-                    )
-                if eval_stats["errors"]:
-                    with st.expander(f"Incidencias ({len(eval_stats['errors'])})"):
-                        for error in eval_stats["errors"]:
-                            st.write(f"- {error}")
-            except Exception as exc:
-                st.error(f"No se pudo completar la evaluación: {type(exc).__name__}: {exc}")
-except Exception as exc:
-    st.error(f"No se pudo consultar el estado de preparación: {exc}")
+        status.update(label="El proceso se detuvo; se conservaron los resultados guardados", state="error")
+        st.error(f"No se pudo completar el proceso integral: {type(exc).__name__}: {exc}")
+        st.info("Puede volver a ejecutar el mismo botón. Las ofertas guardadas y evaluaciones existentes no deberían duplicarse.")
 
 st.divider()
 st.header("📌 Bandeja priorizada")
