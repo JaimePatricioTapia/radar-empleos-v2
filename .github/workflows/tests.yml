@@ -13,6 +13,7 @@ on:
       - feature/multisource-job-discovery-stage1
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
+      - feature/one-click-search-85-affinity
 
 jobs:
   unit-tests:
