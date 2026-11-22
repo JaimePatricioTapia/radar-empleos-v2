@@ -1,4 +1,4 @@
-name: Python tests
+name: Python tests # includes the one-click search pipeline branch
 
 on:
   push:
