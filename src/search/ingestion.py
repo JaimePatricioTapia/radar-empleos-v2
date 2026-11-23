@@ -120,6 +120,12 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
              "publication_date_unknown": 0, "errors": 0, "by_source": {},
              "error_details": [], "offers": []}
     started_at = datetime.now(timezone.utc)
+
+    def notify(event: dict) -> None:
+        if on_progress:
+            event["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+            on_progress(event)
+
     seen = set()
     for source in sources:
         label, connector_name = SOURCE_REGISTRY[source]
@@ -138,7 +144,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                 if progress:
                     progress(f"Se omiten {skipped} consultas restantes de {label} tras {consecutive_errors} errores consecutivos.")
                 if on_progress:
-                    on_progress({
+                    notify({
                         "stage": "discovery", "status": "source_skipped",
                         "source": source, "source_label": label,
                         "queries_completed": stats["queries_completed"],
@@ -152,7 +158,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
             if progress:
                 progress(f"Buscando «{query_label}» en {label}…")
             if on_progress:
-                on_progress({
+                notify({
                     "stage": "discovery", "status": "running", "source": source,
                     "source_label": label, "query": query_label,
                     "queries_completed": stats["queries_completed"],
