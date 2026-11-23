@@ -61,3 +61,9 @@ Protecciones incorporadas en la rama de optimización:
 - Al alcanzar el tope, la búsqueda se pausa sin borrar resultados ni seguir consumiendo cuota; quedan pendientes para una ejecución posterior.
 
 La evaluación del CV utiliza embeddings al procesarlo. No vuelva a cargar el mismo CV sin necesidad; primero verifique si ya está activo. La configuración de modelo y dimensiones debe mantenerse compatible con el esquema de Supabase (3072 dimensiones).
+
+Los topes preventivos pueden ajustarse con variables de entorno o secretos de Streamlit:
+- `RADAR_MAX_DAILY_JOB_CHUNKS=250`
+- `RADAR_MAX_DAILY_EVALUATIONS=15`
+
+Se recomienda mantener los valores predeterminados hasta comprobar el consumo real de la cuenta gratuita. Reducirlos disminuye el consumo; aumentarlos puede agotar más rápidamente la cuota del proveedor.
