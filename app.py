@@ -299,6 +299,18 @@ def render_search_task():
                 f"Preseleccionadas: **{event.get('ranked', 0)}** · "
                 f"Incidencias: **{event.get('errors', 0)}**"
             )
+            if "embedding_budget_remaining" in event:
+                st.caption(
+                    f"Embeddings utilizados últimas 24 h: {event.get('embedding_chunks_used', 0)} · "
+                    f"Presupuesto restante: {event.get('embedding_budget_remaining', 0)} · "
+                    f"Ofertas pendientes de preparación: {event.get('preparation_pending', 0)}"
+                )
+                if event.get("preparation_budget_exhausted"):
+                    st.warning(
+                        "Se alcanzó el límite preventivo de 250 fragmentos de ofertas en 24 h. "
+                        "La evaluación continúa con las ofertas que ya tienen fragmentos guardados; "
+                        "las nuevas pendientes se prepararán cuando se renueve el presupuesto."
+                    )
             if event.get("offers_total"):
                 st.progress(
                     min(1.0, event.get("offers_processed", 0) / max(1, event.get("offers_total", 1))),
