@@ -119,7 +119,8 @@ st.info(
 )
 st.warning(
     "La cobertura depende de la disponibilidad y estructura de cada portal. "
-    "LinkedIn se consulta mediante resultados públicos de JobSpy, sin iniciar sesión en su cuenta."
+    "LinkedIn se consulta mediante resultados públicos de JobSpy, sin iniciar sesión en su cuenta. " 
+    "Se descartan avisos con fecha verificable superior a 14 días; los portales que no informan fecha se identifican por separado."
 )
 
 source_labels = {key: label for key, (label, _) in SOURCE_REGISTRY.items()}
@@ -213,6 +214,8 @@ def render_search_task():
     stage_label = stage_names.get(stage, "Proceso integral")
     st.subheader("Estado de la búsqueda")
     if not task.finished:
+        if task.stop_requested:
+            st.info("Detención solicitada. Radar terminará la consulta actual y continuará con preparación y evaluación.")
         if stage == "discovery":
             total = max(1, int(event.get("queries_total", estimated_queries)))
             completed = min(total, int(event.get("queries_completed", 0)))
