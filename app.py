@@ -378,6 +378,11 @@ try:
                 f"{item.get('company') or 'Empresa no informada'} · "
                 f"{item.get('sector_category') or 'POR_CLASIFICAR'}"
             )
+            publication_status = (item.get("raw_metadata") or {}).get("publication_date_status")
+            if publication_status == "unknown":
+                st.caption("Fecha de publicación no informada por el portal; antigüedad no verificable.")
+            elif publication_status == "verified_recent":
+                st.caption("Fecha de publicación verificada: dentro de los últimos 14 días.")
             if item.get("affinity_score") is not None:
                 st.write(
                     f"Afinidad: **{item['affinity_score']}%** · "
