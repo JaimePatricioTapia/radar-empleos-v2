@@ -78,3 +78,28 @@ def test_embeddings_do_not_retry_non_transient_errors(monkeypatch):
         embed_texts(["texto"], api_key="fake")
 
     assert sleeps == []
+
+
+
+def test_embedding_rate_limit_exhaustion_raises_resumable_error(monkeypatch):
+    calls = []
+    waits = []
+
+    class FakeModels:
+        def embed_content(self, **kwargs):
+            calls.append(kwargs)
+            raise RuntimeError("429 RESOURCE_EXHAUSTED retry in 0.5s")
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(embeddings.genai, "Client", FakeClient)
+    monkeypatch.setattr(embeddings.time, "sleep", waits.append)
+
+    with pytest.raises(embeddings.EmbeddingRateLimitError) as error:
+        embed_texts(["texto"], api_key="fake", max_retries=1)
+
+    assert len(calls) == 2
+    assert waits == [0.5]
+    assert error.value.retry_after_seconds == pytest.approx(0.5)
