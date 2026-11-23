@@ -141,8 +141,14 @@ limit_per_query = st.slider(
     value=10,
     step=5,
 )
-estimated_queries = len(selected_sources) * len(selected_roles)
-st.caption(f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda.")
+estimated_queries = sum(
+    1 if source == "linkedin" else len(selected_roles)
+    for source in selected_sources
+)
+st.caption(
+    f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda. "
+    "LinkedIn agrupa los cargos en una sola consulta para reducir bloqueos por ráfagas."
+)
 
 try:
     active_cv = (
