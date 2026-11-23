@@ -15,6 +15,7 @@ on:
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
       - feature/one-click-search-85-affinity
+      - feature/streamlit-cloud-deployment
 
 jobs:
   unit-tests:
