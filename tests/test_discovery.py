@@ -93,3 +93,45 @@ def test_jobspy_sources_are_independent_and_google_jobs_is_not_advertised():
     assert SOURCE_REGISTRY["indeed"][1] == "indeed"
     assert CONNECTORS["linkedin"] is not CONNECTORS["indeed"]
     assert "google" not in SOURCE_REGISTRY
+
+
+def test_run_discovery_does_not_repeat_linkedin_for_each_selected_jobspy_source(monkeypatch):
+    from src.search import ingestion
+
+    linkedin = Mock(return_value=[])
+    indeed = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "linkedin", linkedin)
+    monkeypatch.setitem(ingestion.CONNECTORS, "indeed", indeed)
+
+    result = ingestion.run_discovery(
+        client=object(),
+        user_id="user-1",
+        roles=["Business Analyst", "Analista Funcional", "Project Manager"],
+        sources=["linkedin", "indeed"],
+    )
+
+    assert linkedin.call_count == 1
+    assert indeed.call_count == 3
+    assert result["queries"] == 4
+    assert result["errors"] == 0
+
+
+def test_linkedin_failure_does_not_stop_other_portals(monkeypatch):
+    from src.search import ingestion
+
+    linkedin = Mock(side_effect=RuntimeError("429 blocked"))
+    indeed = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "linkedin", linkedin)
+    monkeypatch.setitem(ingestion.CONNECTORS, "indeed", indeed)
+
+    result = ingestion.run_discovery(
+        client=object(),
+        user_id="user-1",
+        roles=["Business Analyst", "Analista Funcional"],
+        sources=["linkedin", "indeed"],
+    )
+
+    assert linkedin.call_count == 1
+    assert indeed.call_count == 2
+    assert result["errors"] == 1
+    assert result["by_source"]["indeed"]["errors"] == 0
