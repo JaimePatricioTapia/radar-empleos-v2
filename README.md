@@ -19,14 +19,14 @@ Nueva versión independiente del Radar de Empleos. Este repositorio no modifica 
 - Persistencia de versiones del CV, fragmentos, ofertas y evaluaciones: implementada.
 - Seguridad RLS: habilitada en las siete tablas.
 - Recuperación semántica pgvector del CV: implementada.
-- Autenticación, carga de CV desde navegador con procesamiento temporal y evaluación manual: implementadas en la rama cloud; pendientes de prueba integrada.
+- Autenticación, carga de CV desde navegador con procesamiento temporal y evaluación manual: implementadas en la rama cloud; CI validado con 51 pruebas aprobadas. Pendiente únicamente el smoke test visual/funcional en la URL pública de Streamlit.
 - Etapa 1 — búsqueda automática multifuente: implementada.
 - Etapa 2 — fragmentación y embeddings de ofertas, preselección semántica pgvector, recuperación de evidencia CV sin embeddings extra, evaluación Gemini por lotes y ranking sectorial: implementada en la rama feature/semantic-evaluation-ranking; pendiente validación integrada local.
 - Historial de estados: 59 postuladas + 220 descartadas migradas desde el Radar anterior; estados históricos auditables.
 
 ## Despliegue Streamlit Community Cloud
 
-Consulte [docs/DEPLOY_STREAMLIT_CLOUD.md](docs/DEPLOY_STREAMLIT_CLOUD.md). El repositorio debe permanecer privado y los secretos se configuran en la plataforma.
+Consulte [docs/DEPLOY_STREAMLIT_CLOUD.md](docs/DEPLOY_STREAMLIT_CLOUD.md). El repositorio GitHub permanece privado; la aplicación Streamlit se publica con autenticación obligatoria y datos aislados por RLS, según autorización del propietario. Los secretos se configuran solo en la plataforma.
 
 ## Inicio local
 
