@@ -214,9 +214,9 @@ if run_pipeline:
                 "procesar cuando se renueve la ventana móvil de 24 horas."
             )
             st.caption(
-                f"Embeddings: {preparation.get('chunks_embedded_last_24h', 0)}/250 "
+                f"Embeddings: {preparation.get('chunks_embedded_last_24h', 0)}/{settings.max_daily_job_chunks} "
                 f"fragmentos en las últimas 24 h · "
-                f"Evaluaciones: {15 - evaluation.get('budget_remaining', 0)}/15 "
+                f"Evaluaciones: {settings.max_daily_evaluations - evaluation.get('budget_remaining', 0)}/{settings.max_daily_evaluations} "
                 "en las últimas 24 h."
             )
         st.subheader("Resultado por portal")
