@@ -1,10 +1,10 @@
 # Radar de Empleos 2.0 — Requisitos funcionales y auditoría visual
 
 - **Documento:** RF-RADAR-001
-- **Versión:** 1.0 (línea base inicial)
-- **Fecha:** 2026-11-21
+- **Versión:** 1.1 (línea base + control de cuota gratuita)
+- **Fecha:** 2026-11-23
 - **Estado:** Borrador controlado para validación del propietario
-- **Rama de trabajo:** `feature/requirements-visual-audit-classification`
+- **Rama de trabajo:** `feature/free-tier-token-optimization`
 - **Principio:** una mejora no puede eliminar ni degradar funciones existentes sin aprobación expresa.
 
 ## 1. Propósito y control de cambios
@@ -49,6 +49,16 @@ Toda modificación debe:
 - El identificador RP y los orígenes permitidos se definirán para el dominio final antes del registro definitivo de Passkeys.
 - La implementación debe probar registro, inicio de sesión, cancelación, credencial no disponible, cierre de sesión y recuperación.
 
+### 2.5 Restricción económica y cuota gratuita
+- El presupuesto disponible para servicios externos de pago es **CLP $0**. La aplicación debe funcionar solo con planes gratuitos.
+- La optimización de tokens, solicitudes y cuotas API es un requisito no funcional crítico, no una mejora opcional.
+- Antes de llamar a Gemini se deben aplicar filtros locales y deduplicación; los resultados ya calculados se reutilizan.
+- Los embeddings y evaluaciones se deben persistir incrementalmente para no repetir trabajo tras un error.
+- Los errores 429/5xx transitorios deben respetar el tiempo de reintento indicado por el proveedor y aplicar backoff limitado.
+- El proceso debe detenerse de forma controlada al alcanzar un presupuesto preventivo interno, conservar los resultados y mostrar qué queda pendiente.
+- Los límites internos deben ser configurables y conservadores; nunca deben interpretarse como la cuota exacta garantizada por Google.
+- Queda prohibido introducir dependencias de planes pagados, activar facturación o cambiar a un proveedor de pago para resolver límites.
+
 ## 3. Requisitos funcionales
 
 | ID | Requisito | Criterio de aceptación | Prioridad |
@@ -71,6 +81,9 @@ Toda modificación debe:
 | RF-016 | Auditoría | Cada versión registra requisitos afectados, pruebas, evidencias visuales y resultado de regresión. | Alta |
 | RF-017 | Ejecución integral con una acción | Un único botón inicia búsqueda multifuente, preparación semántica, evaluación de afinidad y actualización de la bandeja priorizada, sin exigir acciones manuales intermedias. | Crítica |
 | RF-018 | Continuidad y recuperación del proceso | El flujo integral procesa por lotes hasta agotar ofertas elegibles, conserva resultados parciales, evita duplicados y permite reanudar desde la etapa pendiente si ocurre un error. | Alta |
+| RF-025 | Operación exclusivamente gratuita | El Radar no requiere servicios pagados; aplica filtros locales, caché, deduplicación, límites preventivos y detención segura para proteger cuotas gratuitas. | Crítica |
+| RF-026 | Persistencia incremental de embeddings | Cada sublote de embeddings exitoso se persiste inmediatamente y los reintentos calculan solo los fragmentos faltantes. | Crítica |
+| RF-027 | Recuperación de errores de proveedor | Los errores transitorios 429/5xx respetan retryDelay y backoff; los errores permanentes no se reintentan indefinidamente. | Alta |
 
 ## 4. Requisitos de clasificación de ofertas
 
@@ -155,6 +168,11 @@ Las capturas deben:
 | QA-022 | Sesiones concurrentes A/B | Dos usuarios autenticados en sesiones distintas no comparten tokens, identidad ni datos; RLS limita cada consulta a auth.uid(). | Crítica |
 | QA-023 | Ingesta de CV cloud | Un PDF válido se procesa y activa solo para el usuario autenticado; un PDF inválido falla de forma controlada y los temporales se eliminan. | Crítica |
 | QA-024 | Smoke test Community Cloud | La rama y entrypoint seleccionados instalan dependencias, arrancan la app y permiten autenticación, carga CV y consulta inicial de bandeja. | Alta |
+| QA-025 | Error Gemini 429 con retryDelay | Se espera el tiempo indicado por Google, se reintenta de forma limitada y no se repite una llamada antes del plazo. | Crítica |
+| QA-026 | Fallo entre sublotes de embeddings | Los sublotes ya guardados permanecen; al reanudar se calculan únicamente los índices faltantes. | Crítica |
+| QA-027 | Presupuesto de embeddings | Al alcanzar 250 fragmentos en una ventana móvil de 24 horas, el Radar detiene nuevas solicitudes y conserva pendientes. | Crítica |
+| QA-028 | Presupuesto de evaluaciones | Al alcanzar 15 evaluaciones en una ventana móvil de 24 horas, el Radar detiene llamadas generativas adicionales. | Crítica |
+| QA-029 | Servicios exclusivamente gratuitos | La configuración y el flujo no requieren activar facturación ni usar modelos/servicios de pago. | Crítica |
 
 ## 7. Procedimiento de auditoría visual por versión
 
@@ -195,6 +213,7 @@ Mantener un registro por cambio con esta estructura:
 - Clasificación de ofertas: existe actualmente un selector de estado con botón «Guardar estado» en cada tarjeta. El usuario reporta que echa de menos la botonera de clasificación rápida; la restauración de acciones directas y la vista de historial quedan como trabajo pendiente.
 - Passkeys: trabajo separado en rama propia; no se considera implementado.
 - Capturas visuales aprobadas: pendientes de levantar desde la aplicación real.
+- Control de cuota gratuita: se está implementando en rama independiente con 250 fragmentos de ofertas y 15 evaluaciones por ventana móvil de 24 horas; estos son topes preventivos internos, no cuotas oficiales de Google.
 - Acceso público autenticado con datos privados por usuario: decisión de arquitectura acordada; requiere prueba de aislamiento multiusuario y protección del despliegue antes de abrir registros a terceros.
 
 ## 10. Registro incremental de cambios aprobados
@@ -203,6 +222,7 @@ Mantener un registro por cambio con esta estructura:
 |---|---|---|---|---|
 | CHG-2026-001 | 2026-11-21 | RF-007, RF-017, RF-018, VIS-003–VIS-005, QA-006–QA-007, QA-018–QA-020 | El propietario autorizó elevar el umbral de recomendación de 75% a 85% y consolidar búsqueda, preparación semántica y evaluación en una única acción con continuidad y recuperación. | Aprobado para implementación; pendiente de código y pruebas. |
 | CHG-2026-002 | 2026-11-22 | RF-019–RF-022, VIS-011–VIS-012, QA-021–QA-024 | El propietario autorizó preparar Radar 2.0 para Streamlit Community Cloud, mantener GitHub privado, procesar CV mediante carga temporal y aislar clientes de Supabase por sesión. No autoriza hacer público el repositorio ni cambiar el esquema de Supabase. | Aprobado para implementación; pendiente de pruebas integradas y autorización GitHub/Streamlit. |
+| CHG-2026-003 | 2026-11-23 | RF-025–RF-027, QA-025–QA-029 | El propietario ordenó priorizar operación exclusivamente gratuita y optimización estricta de cuota. Se autorizó auditoría comparativa con Radar original, filtros locales, presupuestos preventivos, reintentos con retryDelay y persistencia incremental/reanudable de embeddings. No se autorizan servicios pagados ni cambios de esquema Supabase. | Implementación en rama independiente; pruebas y despliegue pendientes. |
 
 Las nuevas decisiones se agregan como filas; no se sobrescriben decisiones históricas. Toda modificación futura de este documento requiere presentar previamente la propuesta al propietario y esperar su autorización explícita.
 
