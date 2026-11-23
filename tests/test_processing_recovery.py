@@ -116,6 +116,8 @@ def test_partial_embedding_batch_is_persisted_and_only_missing_chunks_retry(monk
         lambda: SimpleNamespace(
             gemini_api_key="fake",
             embedding_model="gemini-embedding-001",
+            max_daily_job_chunks=250,
+            max_daily_evaluations=15,
         ),
     )
     expected = processing.chunk_job_description(offer["title"], offer["description"])
