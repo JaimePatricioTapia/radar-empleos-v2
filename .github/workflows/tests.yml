@@ -15,6 +15,7 @@ on:
       - feature/streamlit-cloud-deployment
       - feature/radar-14d-progress-resume
       - feature/free-tier-token-optimization-v2
+      - feature/cv-derived-role-families
   pull_request:
     branches:
       - main

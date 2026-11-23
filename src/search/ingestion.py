@@ -109,6 +109,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                   progress: Callable[[str], None] | None = None,
                   on_progress: Callable[[dict], None] | None = None,
                   on_offer: Callable[[dict], None] | None = None,
+                  role_context: list[dict] | None = None,
                   should_stop: Callable[[], bool] | None = None,
                   max_age_days: int = MAX_PUBLICATION_AGE_DAYS) -> dict:
     """Descubre y guarda avisos sin evaluar con Gemini."""
@@ -126,6 +127,10 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
              "publication_date_unknown": 0, "errors": 0, "by_source": {},
              "error_details": [], "offers": []}
     started_at = datetime.now(timezone.utc)
+    role_lookup = {}
+    for family in role_context or []:
+        for title in family.get("titles", []):
+            role_lookup[re.sub(r"\s+", " ", str(title)).strip().casefold()] = family
 
     def notify(event: dict) -> None:
         if on_progress:
@@ -161,12 +166,20 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
                     })
                 break
+            family_for_query = role_lookup.get(str(query_label).strip().casefold())
+            if family_for_query:
+                display_query_label = f"{family_for_query.get('family_name')} · {query_label}"
+            elif source == "linkedin" and role_context:
+                family_names = ", ".join(item.get("family_name", "") for item in role_context)
+                display_query_label = f"Familias agrupadas: {family_names}"
+            else:
+                display_query_label = query_label
             if progress:
-                progress(f"Buscando «{query_label}» en {label}…")
+                progress(f"Buscando «{display_query_label}» en {label}…")
             if on_progress:
                 notify({
                     "stage": "discovery", "status": "running", "source": source,
-                    "source_label": label, "query": query_label,
+                    "source_label": label, "query": display_query_label,
                     "queries_completed": stats["queries_completed"],
                     "queries_total": planned_queries, "offers_found": stats["total_found"],
                     "offers_saved": stats["saved"], "duplicates": stats["duplicates"],
@@ -177,7 +190,11 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     max(limit_per_query, min(limit_per_query * len(roles), 25))
                     if source == "linkedin" else limit_per_query
                 )
-                offers = connector(query, limit=query_limit)
+                family_terms = (family_for_query or {}).get("domain_terms", [])
+                connector_query = query
+                if source != "linkedin" and family_terms:
+                    connector_query = f"{query} {' '.join(family_terms[:2])}"
+                offers = connector(connector_query, limit=query_limit)
                 consecutive_errors = 0
                 for offer in offers:
                     if not offer:
@@ -185,6 +202,24 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     stats["total_found"] += 1
                     source_stats["found"] += 1
                     offer["job_hash"] = _stable_hash(offer)
+                    # Procedencia auditable de la consulta, almacenada en JSON existente.
+                    if source == "linkedin":
+                        matched_families = list(role_context or [])
+                    else:
+                        family = role_lookup.get(str(query_label).strip().casefold())
+                        matched_families = [family] if family else []
+                    if matched_families:
+                        metadata = dict(offer.get("raw_metadata") or {})
+                        metadata["search_origin"] = {
+                            "families": [
+                                {"id": item.get("family_id"), "name": item.get("family_name"),
+                                 "priority": item.get("priority")}
+                                for item in matched_families
+                            ],
+                            "query": query_label,
+                            "domain_terms": (family_for_query or {}).get("domain_terms", []) if source != "linkedin" else [],
+                        }
+                        offer["raw_metadata"] = metadata
                     published = _parse_published_at(offer.get("published_at"))
                     offer["published_at"] = published
                     if published:
@@ -252,7 +287,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                 if on_progress:
                     notify({
                         "stage": "discovery", "status": "stopped" if stats["stopped_early"] else "running",
-                        "source": source, "source_label": label, "query": query_label,
+                        "source": source, "source_label": label, "query": display_query_label,
                         "queries_completed": stats["queries_completed"], "queries_skipped": stats["queries_skipped"],
                         "queries_total": planned_queries,
                         "offers_found": stats["total_found"], "offers_saved": stats["saved"],
