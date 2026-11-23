@@ -48,3 +48,64 @@ def test_upload_rejects_invalid_files(payload, filename, message):
         service.ingest_cv_upload(
             payload, filename, client=object(), user_id="user-1"
         )
+
+
+def test_same_cv_hash_reuses_persisted_embeddings(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            gemini_api_key="fake",
+            embedding_dimensions=3072,
+            embedding_model="gemini-embedding-001",
+        ),
+    )
+
+    class Query:
+        def __init__(self, table):
+            self.table = table
+
+        def select(self, *args):
+            return self
+
+        def eq(self, *args):
+            return self
+
+        def limit(self, *args):
+            return self
+
+        def execute(self):
+            if self.table == "cv_versions":
+                return SimpleNamespace(data=[{
+                    "id": "cv-version-1",
+                    "is_active": True,
+                    "embedding_model": "gemini-embedding-001",
+                    "embedding_dimensions": 3072,
+                }])
+            if self.table == "cv_chunks":
+                return SimpleNamespace(data=[{"id": "chunk-1"}])
+            raise AssertionError(f"Unexpected table: {self.table}")
+
+    class FakeClient:
+        def table(self, name):
+            return Query(name)
+
+    def embeddings_must_not_run(*args, **kwargs):
+        raise AssertionError("The same CV must not consume embedding quota again.")
+
+    monkeypatch.setattr(service, "embed_texts", embeddings_must_not_run)
+
+    result = service._persist_prepared(
+        {
+            "cv": {"cv_hash": "same-hash", "filename": "CV.pdf"},
+            "chunks": [{"text": "existing chunk"}],
+        },
+        client=FakeClient(),
+        user_id="user-1",
+    )
+
+    assert result["cached"] is True
+    assert result["cv_version_id"] == "cv-version-1"
+    assert result["chunk_count"] == 1
