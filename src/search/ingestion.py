@@ -166,12 +166,17 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
                     })
                 break
+            family_for_query = role_lookup.get(str(query_label).strip().casefold())
+            display_query_label = (
+                f"{family_for_query.get('family_name')} · {query_label}"
+                if family_for_query else query_label
+            )
             if progress:
-                progress(f"Buscando «{query_label}» en {label}…")
+                progress(f"Buscando «{display_query_label}» en {label}…")
             if on_progress:
                 notify({
                     "stage": "discovery", "status": "running", "source": source,
-                    "source_label": label, "query": query_label,
+                    "source_label": label, "query": display_query_label,
                     "queries_completed": stats["queries_completed"],
                     "queries_total": planned_queries, "offers_found": stats["total_found"],
                     "offers_saved": stats["saved"], "duplicates": stats["duplicates"],
@@ -274,7 +279,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                 if on_progress:
                     notify({
                         "stage": "discovery", "status": "stopped" if stats["stopped_early"] else "running",
-                        "source": source, "source_label": label, "query": query_label,
+                        "source": source, "source_label": label, "query": display_query_label,
                         "queries_completed": stats["queries_completed"], "queries_skipped": stats["queries_skipped"],
                         "queries_total": planned_queries,
                         "offers_found": stats["total_found"], "offers_saved": stats["saved"],
