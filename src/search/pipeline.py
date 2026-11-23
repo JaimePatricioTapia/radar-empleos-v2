@@ -123,6 +123,7 @@ def run_full_search_pipeline(
                 client,
                 user_id=user_id,
                 limit=max(1, min(int(chunk_batch_size), pending)),
+                on_progress=lambda details: emit_stage("preparation", status="running", **details),
             )
         except EmbeddingRateLimitError as exc:
             preparation["api_quota_paused"] = True
@@ -194,6 +195,7 @@ def run_full_search_pipeline(
             client,
             user_id=user_id,
             top_k=evaluation_limit,
+            on_progress=lambda details: emit_stage("evaluation", status="running", **details),
         )
         evaluation["ranked"] += int(batch.get("ranked", 0))
         evaluation["evaluated"] += int(batch.get("evaluated", 0))
