@@ -88,7 +88,14 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
             "últimas 24 horas. No se llamó a Gemini; inténtelo cuando se renueve la ventana."
         )
 
-    query = f"Cargo: {title}\nEmpresa: {offer.get('company') or 'No informada'}\nDescripción: {description}"
+    compact_description = description
+    if len(compact_description) > 10000:
+        compact_description = (
+            compact_description[:8000]
+            + "\n\n[Se omitió una sección intermedia extensa para controlar el consumo de tokens.]\n\n"
+            + compact_description[-2000:]
+        )
+    query = f"Cargo: {title}\nEmpresa: {offer.get('company') or 'No informada'}\nDescripción: {compact_description}"
     evidence = retrieve_cv_evidence(
         query,
         client=client,
@@ -99,8 +106,17 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
     if not evidence:
         raise ValueError("No se encontró evidencia del CV activo. Procese nuevamente el CV.")
 
+    evaluation_offer = {
+        "title": title,
+        "company": offer.get("company"),
+        "location": offer.get("location"),
+        "source_url": offer.get("source_url"),
+        "source": offer.get("source") or "manual",
+        "job_hash": normalized["job_hash"],
+        "description": compact_description,
+    }
     run = evaluate_offer(
-        normalized,
+        evaluation_offer,
         {
             "cv_hash": cv_version["cv_hash"],
             "filename": cv_version.get("source_filename"),
