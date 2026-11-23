@@ -362,7 +362,13 @@ if evaluate_submitted:
                     st.write(f"- {item}")
                 st.markdown("**Evidencia recuperada del CV**")
                 for item in result["evidence"]:
-                    with st.expander(f"{item['section']} · similitud {item.get('similarity', 0):.3f}"):
+                    similarity = item.get("similarity")
+                    evidence_label = (
+                        f"similitud {similarity:.3f}"
+                        if similarity is not None
+                        else "evidencia recuperada del historial"
+                    )
+                    with st.expander(f"{item['section']} · {evidence_label}"):
                         st.write(item["text"])
                 st.caption(f"Modelo: {result['model']} · Prompt: {result['prompt_version']} · ID evaluación: {result['evaluation_id']}")
                 if result.get("cached"):
