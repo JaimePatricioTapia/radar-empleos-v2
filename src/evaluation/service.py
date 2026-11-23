@@ -7,7 +7,11 @@ from src.config import get_settings
 from src.db.repository import upsert_job_offer, save_evaluation
 from src.evaluation.evaluator import evaluate_offer
 from src.search.retriever import retrieve_cv_evidence
-from src.search.processing import TARGET_STRATEGY
+from src.search.processing import (
+    TARGET_STRATEGY,
+    MAX_DAILY_EVALUATIONS,
+    _rolling_budget_start,
+)
 
 
 def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
@@ -38,6 +42,52 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
     cv_version = cv_result.data[0]
 
     saved_offer = upsert_job_offer(client, user_id=user_id, offer=normalized)
+
+    # Reutilizar una evaluación ya hecha con el mismo aviso y versión del CV.
+    previous = (
+        client.table("evaluations")
+        .select("id,result_json,model,prompt_version,evidence_chunk_ids")
+        .eq("user_id", user_id)
+        .eq("job_offer_id", saved_offer["id"])
+        .eq("cv_version_id", cv_version["id"])
+        .limit(1).execute().data or []
+    )
+    if previous:
+        cached = previous[0]
+        evidence_ids = cached.get("evidence_chunk_ids") or []
+        evidence_rows = []
+        if evidence_ids:
+            evidence_rows = (
+                client.table("cv_chunks")
+                .select("chunk_id,section,content")
+                .eq("user_id", user_id).eq("cv_version_id", cv_version["id"])
+                .in_("chunk_id", evidence_ids).execute().data or []
+            )
+        return {
+            "offer": saved_offer,
+            "evaluation": cached["result_json"],
+            "evaluation_id": cached["id"],
+            "evidence": [
+                {"chunk_id": row["chunk_id"], "section": row["section"],
+                 "text": row["content"], "similarity": None}
+                for row in evidence_rows
+            ],
+            "model": cached["model"],
+            "prompt_version": cached["prompt_version"],
+            "cached": True,
+        }
+
+    recent = (
+        client.table("evaluations").select("id").eq("user_id", user_id)
+        .gte("evaluated_at", _rolling_budget_start())
+        .limit(MAX_DAILY_EVALUATIONS).execute().data or []
+    )
+    if len(recent) >= MAX_DAILY_EVALUATIONS:
+        raise RuntimeError(
+            "Se alcanzó el límite preventivo gratuito de 15 evaluaciones en las "
+            "últimas 24 horas. No se llamó a Gemini; inténtelo cuando se renueve la ventana."
+        )
+
     query = f"Cargo: {title}\nEmpresa: {offer.get('company') or 'No informada'}\nDescripción: {description}"
     evidence = retrieve_cv_evidence(
         query,
@@ -74,4 +124,5 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
         "evidence": evidence,
         "model": run["model"],
         "prompt_version": run["prompt_version"],
+        "cached": False,
     }
