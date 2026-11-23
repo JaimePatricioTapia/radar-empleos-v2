@@ -9,7 +9,7 @@ from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
 from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
-from src.search.pipeline import run_full_search_pipeline
+from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
@@ -175,98 +175,158 @@ run_pipeline = st.button(
     use_container_width=True,
 )
 if run_pipeline:
-    status = st.status("Iniciando búsqueda integral…", expanded=True)
-    progress_line = st.empty()
-    try:
-        result = run_full_search_pipeline(
-            client,
-            user_id=user["id"],
-            roles=selected_roles,
-            sources=selected_sources,
-            limit_per_query=limit_per_query,
-            progress=lambda message: progress_line.write(message),
-        )
-        discovery = result["discovery"]
-        preparation = result["preparation"]
-        evaluation = result["evaluation"]
-        status.update(
-            label=(
-                "Proceso pausado por límite temporal de Gemini"
-                if result.get("paused_for_api_quota")
-                else "Proceso pausado por protección de cuota gratuita"
-                if result.get("paused_for_free_quota")
-                else "Proceso integral finalizado" if result["completed"]
-                else "Proceso finalizado con incidencias"
-            ),
-            state="complete" if result["completed"] or result.get("paused_for_free_quota") or result.get("paused_for_api_quota") else "error",
-            expanded=not result["completed"],
-        )
-        st.subheader("Resumen de esta ejecución")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Ofertas encontradas", discovery["total_found"])
-        c2.metric("Nuevas guardadas", discovery["saved"])
-        c3.metric("Ofertas preparadas", preparation["offers_chunked"])
-        c4.metric("Evaluadas con Gemini", evaluation["evaluated"])
-        c5.metric(f"Recomendables ≥{MINIMUM_AFFINITY_SCORE}%", len(evaluation["results"]))
-        st.caption(
-            f"Duplicadas: {discovery['duplicates']} · "
-            f"Descripciones insuficientes: {preparation['insufficient']} · "
-            f"Excluidas por preferencias: {preparation['excluded']} · "
-            f"Evaluaciones bajo el umbral: {evaluation['below_threshold']}"
-        )
-        st.caption(
-            f"Lotes de preparación: {preparation['batches']} · "
-            f"Lotes de evaluación: {evaluation['batches']} · "
-            f"Ofertas pendientes de preparación: {preparation['pending_remaining']}"
-        )
-        if result.get("paused_for_api_quota"):
-            st.warning(
-                "Google mantuvo el límite de solicitudes por minuto para generar embeddings. "
-                "La preparación se pausó de forma segura; los fragmentos guardados no se pierden "
-                "y el siguiente intento continuará con los pendientes."
+    st.session_state.radar_search_task = start_search_task(
+        client,
+        user_id=user["id"],
+        roles=selected_roles,
+        sources=selected_sources,
+        limit_per_query=limit_per_query,
+    )
+
+@st.fragment(run_every="1s")
+def render_search_task():
+    task = st.session_state.get("radar_search_task")
+    if task is None:
+        return
+
+    while True:
+        try:
+            event = task.events.get_nowait()
+        except Exception:
+            break
+        if event["type"] == "progress":
+            task.latest_progress = event["data"]
+        elif event["type"] == "offer":
+            recent = getattr(task, "recent_offers", [])
+            recent.append(event["data"])
+            task.recent_offers = recent[-8:]
+        elif event["type"] == "message":
+            task.latest_message = event["data"]
+
+    event = getattr(task, "latest_progress", {})
+    stage = event.get("stage", "discovery")
+    stage_names = {
+        "discovery": "1/3 · Búsqueda multifuente",
+        "preparation": "2/3 · Preparación semántica",
+        "evaluation": "3/3 · Evaluación de afinidad",
+    }
+    stage_label = stage_names.get(stage, "Proceso integral")
+    st.subheader("Estado de la búsqueda")
+    if not task.finished:
+        if stage == "discovery":
+            total = max(1, int(event.get("queries_total", estimated_queries)))
+            completed = min(total, int(event.get("queries_completed", 0)))
+            fraction = completed / total
+            st.progress(fraction / 3, text=f"{stage_label} · {completed}/{total} consultas completadas")
+            st.write(
+                f"**Portal:** {event.get('source_label', 'Preparando')} · "
+                f"**Cargo/consulta:** {event.get('query', '—')}"
             )
-            st.caption(preparation.get("api_quota_message") or "Espere el tiempo indicado por Google antes de reintentar.")
-        if result.get("paused_for_free_quota"):
-            st.warning(
-                "Se alcanzó al menos uno de los límites preventivos gratuitos configurados. "
-                "La etapa que agotó su presupuesto se pausó; la otra pudo utilizar su "
-                "presupuesto disponible. Los resultados y fragmentos ya guardados se "
-                "conservaron; las ofertas pendientes se podrán procesar cuando se "
-                "renueve la ventana móvil de 24 horas."
+        elif stage == "preparation":
+            fraction = 1 / 3 if event.get("status") == "running" else 2 / 3
+            st.progress(fraction, text=stage_label)
+            st.write(
+                f"Ofertas preparadas: **{event.get('offers_prepared', 0)}** · "
+                f"Fragmentos guardados: **{event.get('chunks_saved', 0)}** · "
+                f"Pendientes: **{event.get('pending_remaining', 'calculando')}**"
+            )
+        else:
+            fraction = 2 / 3 if event.get("status") != "completed" else 1.0
+            st.progress(fraction, text=stage_label)
+            st.write(
+                f"Evaluadas: **{event.get('evaluated', 0)}** · "
+                f"Preseleccionadas: **{event.get('ranked', 0)}** · "
+                f"Incidencias: **{event.get('errors', 0)}**"
+            )
+
+        if stage == "discovery":
+            metric_cols = st.columns(5)
+            metric_cols[0].metric("Consultas", f"{event.get('queries_completed', 0)}/{event.get('queries_total', estimated_queries)}")
+            metric_cols[1].metric("Encontradas", event.get("offers_found", 0))
+            metric_cols[2].metric("Nuevas guardadas", event.get("offers_saved", 0))
+            metric_cols[3].metric("Duplicadas", event.get("duplicates", 0))
+            metric_cols[4].metric("Errores", event.get("errors", 0))
+            st.caption(
+                f"Fuera de 14 días: {event.get('stale_skipped', 0)} · "
+                f"Fecha no informada: {event.get('publication_date_unknown', 0)} · "
+                f"Tiempo transcurrido: {event.get('elapsed_seconds', 0)} s"
+            )
+            if not task.stop_requested and st.button(
+                "⏹ Detener búsqueda y procesar resultados recopilados",
+                type="secondary",
+                key="radar_stop_search",
+                use_container_width=True,
+            ):
+                task.request_stop()
+                st.warning("Detención solicitada. Se cerrará la consulta actual y luego se prepararán y evaluarán las ofertas guardadas.")
+        elif task.stop_requested:
+            st.info("La búsqueda se detuvo de forma controlada; Radar está procesando las ofertas recopiladas.")
+
+        recent = getattr(task, "recent_offers", [])
+        if recent:
+            st.markdown("**Últimas ofertas nuevas guardadas**")
+            for offer in reversed(recent[-5:]):
+                freshness = "fecha verificada" if offer.get("publication_date_status") == "verified_recent" else "fecha no informada"
+                st.write(
+                    f"- **{offer.get('title', 'Cargo sin título')}** · "
+                    f"{offer.get('company') or 'Empresa no informada'} · "
+                    f"{offer.get('source', 'portal')} · {freshness}"
+                )
+        if getattr(task, "latest_message", None):
+            st.caption(task.latest_message)
+    else:
+        if task.error:
+            st.error(f"No se pudo completar el proceso: {task.error}")
+            st.info("Las ofertas y los lotes confirmados permanecen guardados. Puede volver a ejecutar el botón; Radar reutilizará el trabajo ya persistido.")
+        else:
+            result = task.result or {}
+            discovery = result.get("discovery", {})
+            preparation = result.get("preparation", {})
+            evaluation = result.get("evaluation", {})
+            if result.get("stopped_early"):
+                st.warning("Búsqueda detenida a solicitud. Las ofertas recopiladas se procesaron automáticamente.")
+            elif result.get("completed"):
+                st.success("Búsqueda, preparación y evaluación finalizadas.")
+            elif result.get("paused_for_api_quota"):
+                st.warning("La preparación quedó pausada por el límite temporal de Gemini. Los lotes guardados se conservaron.")
+            elif result.get("paused_for_free_quota"):
+                st.warning("Se alcanzó el presupuesto preventivo gratuito. Los resultados se conservaron y el trabajo pendiente puede reanudarse.")
+            else:
+                st.info("El proceso terminó con incidencias. Los resultados persistidos se conservaron.")
+            cols = st.columns(5)
+            cols[0].metric("Encontradas", discovery.get("total_found", 0))
+            cols[1].metric("Nuevas guardadas", discovery.get("saved", 0))
+            cols[2].metric("Preparadas", preparation.get("offers_chunked", 0))
+            cols[3].metric("Evaluadas", evaluation.get("evaluated", 0))
+            cols[4].metric("Afinidad ≥85%", len(evaluation.get("results", [])))
+            st.caption(
+                f"Duplicadas: {discovery.get('duplicates', 0)} · "
+                f"Fuera de 14 días: {discovery.get('stale_skipped', 0)} · "
+                f"Fecha no informada: {discovery.get('publication_date_unknown', 0)} · "
+                f"Errores de búsqueda: {discovery.get('errors', 0)}"
             )
             st.caption(
-                f"Embeddings: {preparation.get('chunks_embedded_last_24h', 0)}/{settings.max_daily_job_chunks} "
-                f"fragmentos en las últimas 24 h · "
-                f"Evaluaciones: {settings.max_daily_evaluations - evaluation.get('budget_remaining', 0)}/{settings.max_daily_evaluations} "
-                "en las últimas 24 h."
+                f"Pendientes de preparación: {preparation.get('pending_remaining', 0)} · "
+                f"Evaluaciones con incidencias: {len(evaluation.get('errors', []))}"
             )
-        st.subheader("Resultado por portal")
-        for source, values in discovery["by_source"].items():
-            st.write(
-                f"**{source_labels.get(source, source)}:** {values['found']} encontradas · "
-                f"{values['saved']} nuevas · {values['duplicates']} duplicadas · "
-                f"{values['errors']} errores"
-            )
-        if evaluation["errors"] or discovery["error_details"]:
-            with st.expander("Ver incidencias del proceso"):
-                for error in evaluation["errors"]:
-                    st.write(f"- {error}")
-                for error in discovery["error_details"]:
-                    st.write(f"- {error}")
-        if result["completed"]:
-            st.success(
-                f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
-            )
-        elif result.get("paused_for_api_quota"):
-            st.info("La búsqueda quedó pausada por el límite temporal de Gemini. No necesita volver a cargar el CV; espere y ejecute nuevamente el mismo botón para continuar.")
-        elif result.get("paused_for_free_quota"):
-            st.info("La búsqueda quedó pausada de forma segura para proteger la cuota gratuita. Los resultados parciales están disponibles en la bandeja.")
-        else:
-            st.info("Los resultados parciales quedaron guardados. Revise las incidencias antes de reintentar.")
-    except Exception as exc:
-        status.update(label="El proceso se detuvo; se conservaron los resultados guardados", state="error")
-        st.error(f"No se pudo completar el proceso integral: {type(exc).__name__}: {exc}")
-        st.info("Puede volver a ejecutar el mismo botón. Las ofertas guardadas y evaluaciones existentes no deberían duplicarse.")
+            for source, values in discovery.get("by_source", {}).items():
+                st.write(
+                    f"**{source_labels.get(source, source)}:** "
+                    f"{values.get('found', 0)} encontradas · {values.get('saved', 0)} nuevas · "
+                    f"{values.get('duplicates', 0)} duplicadas · {values.get('errors', 0)} errores"
+                )
+            if discovery.get("error_details") or evaluation.get("errors"):
+                with st.expander("Ver incidencias"):
+                    for error in discovery.get("error_details", []):
+                        st.write(f"- {error}")
+                    for error in evaluation.get("errors", []):
+                        st.write(f"- {error}")
+        if st.button("Cerrar resumen de ejecución", key="radar_close_search_summary"):
+            st.session_state.radar_search_task = None
+            st.rerun()
+
+if st.session_state.get("radar_search_task") is not None:
+    render_search_task()
 
 st.divider()
 st.header("📌 Bandeja priorizada")
