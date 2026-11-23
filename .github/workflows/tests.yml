@@ -1,4 +1,5 @@
 name: Python tests
+# Includes validation for the free-tier optimization branch and cloud deployment PRs.
 
 on:
   push:
