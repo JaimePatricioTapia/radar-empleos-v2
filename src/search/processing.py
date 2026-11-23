@@ -17,6 +17,8 @@ MINIMUM_AFFINITY_SCORE = 85
 # Límites conservadores propios del Radar; no representan la cuota publicada por Google.
 MAX_DAILY_JOB_CHUNKS = 250
 MAX_DAILY_EVALUATIONS = 15
+CV_EVIDENCE_MATCH_COUNT = 8
+MAX_EVALUATION_DESCRIPTION_CHARS = 10000
 ROLLING_BUDGET_HOURS = 24
 
 SECTOR_WEIGHTS = {
@@ -362,7 +364,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
             stats["skipped_excluded"] += 1
             continue
         evidence_rows = (client.rpc("retrieve_cv_evidence_for_offer", {
-            "target_job_offer_id": offer_id, "match_count": 10
+            "target_job_offer_id": offer_id, "match_count": CV_EVIDENCE_MATCH_COUNT
         }).execute().data or [])
         evidence = [{
             "chunk_id": row["chunk_id"], "section": row["section"],
@@ -372,8 +374,24 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
             stats["errors"].append(f"{offer.get('title')}: no se recuperó evidencia CV.")
             continue
         try:
+            description = (offer.get("description") or "").strip()
+            if len(description) > MAX_EVALUATION_DESCRIPTION_CHARS:
+                description = (
+                    description[:8000]
+                    + "\n\n[Se omitió una sección intermedia extensa para controlar el consumo de tokens.]\n\n"
+                    + description[-2000:]
+                )
+            evaluation_offer = {
+                key: offer.get(key)
+                for key in (
+                    "title", "company", "location", "employment_type",
+                    "salary_text", "source", "source_url", "published_at", "job_hash",
+                )
+                if offer.get(key) is not None
+            }
+            evaluation_offer["description"] = description
             run = evaluate_offer(
-                offer,
+                evaluation_offer,
                 {"cv_hash": cv_version["cv_hash"],
                  "filename": cv_version.get("source_filename"),
                  "page_count": cv_version.get("page_count"),
