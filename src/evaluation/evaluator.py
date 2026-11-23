@@ -14,10 +14,20 @@ from src.cv.embeddings import _is_retryable_error, _retry_delay_seconds
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "evaluator_system.md"
+FALLBACK_MODEL = "gemini-3.8-flash"
 
 
 def load_system_prompt() -> str:
     return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _is_unavailable_model_error(exc: Exception) -> bool:
+    """Detecta el 404 explícito de un modelo retirado/no habilitado."""
+    message = str(exc).lower()
+    return (
+        ("404" in message or "not_found" in message)
+        and ("no longer available" in message or "retired" in message)
+    )
 
 
 def evaluate_offer(
@@ -64,6 +74,14 @@ def evaluate_offer(
             response = client.models.generate_content(**request)
             break
         except Exception as exc:
+            if _is_unavailable_model_error(exc) and model_name != FALLBACK_MODEL:
+                logger.warning(
+                    "El modelo Gemini %s ya no está disponible; se cambia automáticamente a %s.",
+                    model_name, FALLBACK_MODEL,
+                )
+                model_name = FALLBACK_MODEL
+                request["model"] = model_name
+                continue
             if attempt >= 4 or not _is_retryable_error(exc):
                 raise
             delay = _retry_delay_seconds(exc, attempt)
