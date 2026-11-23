@@ -109,6 +109,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                   progress: Callable[[str], None] | None = None,
                   on_progress: Callable[[dict], None] | None = None,
                   on_offer: Callable[[dict], None] | None = None,
+                  role_context: list[dict] | None = None,
                   should_stop: Callable[[], bool] | None = None,
                   max_age_days: int = MAX_PUBLICATION_AGE_DAYS) -> dict:
     """Descubre y guarda avisos sin evaluar con Gemini."""
@@ -126,6 +127,10 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
              "publication_date_unknown": 0, "errors": 0, "by_source": {},
              "error_details": [], "offers": []}
     started_at = datetime.now(timezone.utc)
+    role_lookup = {}
+    for family in role_context or []:
+        for title in family.get("titles", []):
+            role_lookup[re.sub(r"\\s+", " ", str(title)).strip().casefold()] = family
 
     def notify(event: dict) -> None:
         if on_progress:
@@ -185,6 +190,23 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     stats["total_found"] += 1
                     source_stats["found"] += 1
                     offer["job_hash"] = _stable_hash(offer)
+                    # Procedencia auditable de la consulta, almacenada en JSON existente.
+                    if source == "linkedin":
+                        matched_families = list(role_context or [])
+                    else:
+                        family = role_lookup.get(str(query_label).strip().casefold())
+                        matched_families = [family] if family else []
+                    if matched_families:
+                        metadata = dict(offer.get("raw_metadata") or {})
+                        metadata["search_origin"] = {
+                            "families": [
+                                {"id": item.get("family_id"), "name": item.get("family_name"),
+                                 "priority": item.get("priority")}
+                                for item in matched_families
+                            ],
+                            "query": query_label,
+                        }
+                        offer["raw_metadata"] = metadata
                     published = _parse_published_at(offer.get("published_at"))
                     offer["published_at"] = published
                     if published:
