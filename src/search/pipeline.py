@@ -52,7 +52,11 @@ def run_full_search_pipeline(
 
     def emit_stage(stage: str, **details) -> None:
         if on_progress:
-            on_progress({"stage": stage, **details})
+            on_progress({
+                "stage": stage,
+                "last_updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                **details,
+            })
 
     report("Etapa 1/3 · Buscando ofertas en los portales seleccionados…")
     discovery = run_discovery(
