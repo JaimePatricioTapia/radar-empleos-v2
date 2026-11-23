@@ -8,6 +8,8 @@ on:
       - feature/affinity-threshold-mining-filter
       - feature/one-click-search-85-affinity
       - feature/streamlit-cloud-deployment
+      - feature/streamlit-cloud-deployment
+      - feature/free-tier-token-optimization
   pull_request:
     branches:
       - main
