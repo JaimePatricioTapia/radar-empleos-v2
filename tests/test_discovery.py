@@ -227,3 +227,15 @@ def test_discovery_stop_finishes_current_query_and_skips_next_queries(monkeypatc
     assert linkedin.call_count == 1
     assert indeed.call_count == 0
     assert progress[-1]["queries_completed"] == 1
+
+
+
+def test_html_publication_date_extractor_reads_explicit_date():
+    from bs4 import BeautifulSoup
+    from src.search.sources import _extract_published_at
+
+    card = BeautifulSoup(
+        '<article><time datetime="2026-11-22T09:00:00Z">Publicado ayer</time></article>',
+        "html.parser",
+    ).article
+    assert _extract_published_at(card) == "2026-11-22T09:00:00Z"
