@@ -313,16 +313,31 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
     settings = get_settings()
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
+    recent_rows = (client.table("evaluations").select("id").eq("user_id", user_id)
+                   .gte("evaluated_at", _rolling_budget_start())
+                   .limit(MAX_DAILY_EVALUATIONS).execute().data or [])
+    daily_remaining = max(0, MAX_DAILY_EVALUATIONS - len(recent_rows))
+    if daily_remaining == 0:
+        return {
+            "ranked": 0, "evaluated": 0, "below_threshold": 0,
+            "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
+            "skipped_existing": 0, "skipped_excluded": 0,
+            "errors": [], "results": [], "budget_exhausted": True,
+            "budget_remaining": 0,
+        }
     cv_rows = (client.table("cv_versions").select("*").eq("user_id", user_id)
                .eq("is_active", True).limit(1).execute().data or [])
     if not cv_rows:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
-    ranked = client.rpc("rank_job_offers_by_cv", {"match_limit": max(1, min(top_k, 1000))}).execute().data or []
+    ranked = client.rpc("rank_job_offers_by_cv", {
+        "match_limit": max(1, min(int(top_k), daily_remaining, MAX_DAILY_EVALUATIONS))
+    }).execute().data or []
     stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
              "skipped_existing": 0, "skipped_excluded": 0,
-             "errors": [], "results": []}
+             "errors": [], "results": [], "budget_exhausted": False,
+             "budget_remaining": daily_remaining}
     for candidate in ranked:
         offer_id = candidate["job_offer_id"]
         previous = (client.table("evaluations").select("id")
@@ -411,26 +426,55 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         key=lambda item: (item["affinity_score"], item["priority_score"]),
         reverse=True,
     )
+    stats["budget_remaining"] = max(0, daily_remaining - stats["evaluated"])
+    stats["budget_exhausted"] = stats["budget_remaining"] == 0
     return stats
 
 
 
 def get_processing_status(client: Any, *, user_id: str) -> dict:
-    """Cuenta ofertas NUEVA aptas, procesadas y pendientes de fragmentación."""
+    """Calcula pendientes reales por chunk y el presupuesto de embeddings disponible."""
     offers = (client.table("job_offers").select("id,title,company,description,raw_metadata")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .limit(2000).execute().data or [])
-    offer_ids = {row["id"] for row in offers}
-    chunk_rows = (client.table("job_chunks").select("job_offer_id")
-                  .eq("user_id", user_id).limit(20000).execute().data or [])
-    chunked_ids = {row["job_offer_id"] for row in chunk_rows if row["job_offer_id"] in offer_ids}
-    eligible = [row for row in offers if not (row.get("raw_metadata") or {}).get("evaluation_filter")
+    offer_ids = [row["id"] for row in offers]
+    chunk_rows = []
+    for start in range(0, len(offer_ids), 100):
+        chunk_rows.extend(
+            client.table("job_chunks").select("job_offer_id,chunk_index")
+            .eq("user_id", user_id).in_("job_offer_id", offer_ids[start:start + 100])
+            .execute().data or []
+        )
+    present: dict[str, set[int]] = {}
+    for row in chunk_rows:
+        present.setdefault(row["job_offer_id"], set()).add(int(row["chunk_index"]))
+
+    eligible = [row for row in offers
+                if not (row.get("raw_metadata") or {}).get("evaluation_filter")
                 and not _excluded_reason(row)]
-    eligible_ids = {row["id"] for row in eligible if len((row.get("description") or "").strip()) >= 150}
+    pending = 0
+    complete = 0
+    needs_description = 0
+    for row in eligible:
+        description = (row.get("description") or "").strip()
+        if len(description) < 150:
+            needs_description += 1
+            continue
+        expected = {int(chunk["chunk_index"]) for chunk in chunk_job_description(
+            row["title"], description
+        )}
+        if expected.issubset(present.get(row["id"], set())):
+            complete += 1
+        else:
+            pending += 1
+
+    chunks_used = _daily_chunk_usage(client, user_id=user_id)
     return {
         "new_offers": len(offers),
-        "chunked_offers": len(chunked_ids),
-        "pending_chunking": len(eligible_ids - chunked_ids),
-        "needs_description": sum(1 for row in eligible if len((row.get("description") or "").strip()) < 150),
+        "chunked_offers": complete,
+        "pending_chunking": pending,
+        "needs_description": needs_description,
         "excluded_by_preferences": len(offers) - len(eligible),
+        "chunks_embedded_last_24h": chunks_used,
+        "daily_chunk_budget_remaining": max(0, MAX_DAILY_JOB_CHUNKS - chunks_used),
     }
