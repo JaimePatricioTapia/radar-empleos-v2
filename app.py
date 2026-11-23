@@ -213,10 +213,11 @@ if run_pipeline:
         )
         if result.get("paused_for_free_quota"):
             st.warning(
-                "Se alcanzó el límite preventivo gratuito configurado en Radar. "
-                "No se hicieron más llamadas a Gemini. Los resultados y fragmentos "
-                "ya guardados se conservaron; las ofertas pendientes se podrán "
-                "procesar cuando se renueve la ventana móvil de 24 horas."
+                "Se alcanzó al menos uno de los límites preventivos gratuitos configurados. "
+                "La etapa que agotó su presupuesto se pausó; la otra pudo utilizar su "
+                "presupuesto disponible. Los resultados y fragmentos ya guardados se "
+                "conservaron; las ofertas pendientes se podrán procesar cuando se "
+                "renueve la ventana móvil de 24 horas."
             )
             st.caption(
                 f"Embeddings: {preparation.get('chunks_embedded_last_24h', 0)}/{settings.max_daily_job_chunks} "
