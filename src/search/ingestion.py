@@ -28,7 +28,7 @@ DEFAULT_TARGET_ROLES = [
     "Especialista Tecnología Operacional Minera",
 ]
 DEFAULT_SOURCES = [
-    "linkedin", "indeed", "google", "chiletrabajos", "computrabajo",
+    "linkedin", "indeed", "chiletrabajos", "computrabajo",
     "contutalento", "bne", "codelco", "finning", "getonbrd",
 ]
 
@@ -55,6 +55,14 @@ def _stable_hash(offer: dict) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
+def _queries_for_source(source: str, roles: list[str]) -> list[tuple[str, str]]:
+    """Reduce LinkedIn a una sola consulta booleana para evitar ráfagas repetidas."""
+    if source == "linkedin":
+        grouped = " OR ".join(f'"{role}"' for role in roles)
+        return [(f"({grouped})", "cargos objetivo agrupados")]
+    return [(role, role) for role in roles]
+
+
 def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                   limit_per_query: int = 12,
                   progress: Callable[[str], None] | None = None) -> dict:
@@ -67,18 +75,24 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
     if not roles or not sources:
         raise ValueError("Seleccione al menos un cargo y un portal.")
     limit_per_query = max(1, min(int(limit_per_query), 30))
-    stats = {"queries": len(roles) * len(sources), "total_found": 0, "saved": 0,
+    planned_queries = sum(len(_queries_for_source(source, roles)) for source in sources)
+    stats = {"queries": planned_queries, "total_found": 0, "saved": 0,
              "duplicates": 0, "errors": 0, "by_source": {}, "error_details": [], "offers": []}
     seen = set()
     for source in sources:
         label, connector_name = SOURCE_REGISTRY[source]
         connector = CONNECTORS[connector_name]
         source_stats = {"found": 0, "saved": 0, "duplicates": 0, "errors": 0}
-        for role in roles:
+        source_queries = _queries_for_source(source, roles)
+        for query, query_label in source_queries:
             if progress:
-                progress(f"Buscando «{role}» en {label}…")
+                progress(f"Buscando «{query_label}» en {label}…")
             try:
-                offers = connector(role, limit=limit_per_query)
+                query_limit = (
+                    max(limit_per_query, min(limit_per_query * len(roles), 25))
+                    if source == "linkedin" else limit_per_query
+                )
+                offers = connector(query, limit=query_limit)
                 for offer in offers:
                     if not offer:
                         continue
@@ -115,8 +129,8 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
             except Exception as exc:
                 stats["errors"] += 1
                 source_stats["errors"] += 1
-                detail = f"{label} / {role}: {type(exc).__name__}: {exc}"
+                detail = f"{label} / {query_label}: {type(exc).__name__}: {exc}"
                 stats["error_details"].append(detail[:500])
-                logger.exception("Falló búsqueda %s para %s", source, role)
+                logger.exception("Falló búsqueda %s para %s", source, query_label)
         stats["by_source"][source] = source_stats
     return stats
