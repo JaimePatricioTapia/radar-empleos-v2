@@ -140,10 +140,11 @@ def _rolling_budget_start() -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=ROLLING_BUDGET_HOURS)).isoformat()
 
 
-def _daily_chunk_usage(client: Any, *, user_id: str) -> int:
+def _daily_chunk_usage(client: Any, *, user_id: str, daily_limit: int | None = None) -> int:
+    limit = max(1, int(daily_limit or get_settings().max_daily_job_chunks))
     rows = (client.table("job_chunks").select("id").eq("user_id", user_id)
             .gte("created_at", _rolling_budget_start())
-            .limit(MAX_DAILY_JOB_CHUNKS).execute().data or [])
+            .limit(limit).execute().data or [])
     return len(rows)
 
 
@@ -184,8 +185,9 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
 
-    used_today = _daily_chunk_usage(client, user_id=user_id)
-    budget_remaining = max(0, MAX_DAILY_JOB_CHUNKS - used_today)
+    daily_chunk_limit = max(1, int(settings.max_daily_job_chunks))
+    used_today = _daily_chunk_usage(client, user_id=user_id, daily_limit=daily_chunk_limit)
+    budget_remaining = max(0, daily_chunk_limit - used_today)
     offers = (client.table("job_offers")
               .select("id,title,company,description,raw_metadata,lifecycle_status,captured_at")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
@@ -305,8 +307,8 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
         "offers_seen": len(offers), "offers_chunked": complete,
         "chunks_saved": chunks_saved, "insufficient": insufficient,
         "excluded": excluded, "eligible_pending": eligible_pending,
-        "budget_exhausted": eligible_pending > 0 and used_after >= MAX_DAILY_JOB_CHUNKS,
-        "budget_remaining": max(0, MAX_DAILY_JOB_CHUNKS - used_after),
+        "budget_exhausted": eligible_pending > 0 and used_after >= daily_chunk_limit,
+        "budget_remaining": max(0, daily_chunk_limit - used_after),
         "chunks_embedded_last_24h": used_after,
     }
 
@@ -316,10 +318,11 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
     settings = get_settings()
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
+    daily_evaluation_limit = max(1, int(settings.max_daily_evaluations))
     recent_rows = (client.table("evaluations").select("id").eq("user_id", user_id)
                    .gte("evaluated_at", _rolling_budget_start())
-                   .limit(MAX_DAILY_EVALUATIONS).execute().data or [])
-    daily_remaining = max(0, MAX_DAILY_EVALUATIONS - len(recent_rows))
+                   .limit(daily_evaluation_limit).execute().data or [])
+    daily_remaining = max(0, daily_evaluation_limit - len(recent_rows))
     if daily_remaining == 0:
         return {
             "ranked": 0, "evaluated": 0, "below_threshold": 0,
@@ -334,7 +337,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
     ranked = client.rpc("rank_job_offers_by_cv", {
-        "match_limit": max(1, min(int(top_k), daily_remaining, MAX_DAILY_EVALUATIONS))
+        "match_limit": max(1, min(int(top_k), daily_remaining, daily_evaluation_limit))
     }).execute().data or []
     stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
@@ -495,5 +498,5 @@ def get_processing_status(client: Any, *, user_id: str) -> dict:
         "needs_description": needs_description,
         "excluded_by_preferences": len(offers) - len(eligible),
         "chunks_embedded_last_24h": chunks_used,
-        "daily_chunk_budget_remaining": max(0, MAX_DAILY_JOB_CHUNKS - chunks_used),
+        "daily_chunk_budget_remaining": max(0, int(get_settings().max_daily_job_chunks) - chunks_used),
     }
