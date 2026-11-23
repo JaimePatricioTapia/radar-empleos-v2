@@ -21,6 +21,7 @@ HEADERS = {
     "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
 }
 TIMEOUT = 18
+BNE_SEARCH_TIMEOUT = 12
 
 
 def clean_text(value: Any) -> str:
@@ -286,7 +287,7 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
     headers = {**HEADERS, "Accept": "application/json, text/plain, */*", "Content-Type": "application/json"}
     response = requests.post(
         "https://www.bne.cl/api/ofertas/busqueda", params={"page": 0, "size": limit},
-        json={"textoBusqueda": query}, headers=headers, timeout=TIMEOUT,
+        json={"textoBusqueda": query}, headers=headers, timeout=BNE_SEARCH_TIMEOUT,
     )
     response.raise_for_status()
     results = []
