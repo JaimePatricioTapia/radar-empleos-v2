@@ -24,6 +24,7 @@ on:
       - feature/affinity-threshold-mining-filter
       - feature/one-click-search-85-affinity
       - feature/streamlit-cloud-deployment
+      - feature/streamlit-cloud-deployment
       - feature/radar-14d-progress-resume
 
 jobs:
