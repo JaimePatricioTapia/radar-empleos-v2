@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 EMBEDDING_DIMENSIONS = 3072
 DEFAULT_EMBEDDING_BATCH_SIZE = 40
 DEFAULT_MAX_RETRIES = 4
+
+
+class EmbeddingRateLimitError(RuntimeError):
+    """La cuota RPM de embeddings sigue limitada tras los reintentos."""
+
+    def __init__(self, message: str, retry_after_seconds: float):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 EmbeddingTask = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
 
 
@@ -25,6 +35,12 @@ def _is_retryable_error(exc: Exception) -> bool:
         for marker in ("429", "RESOURCE_EXHAUSTED", "UNAVAILABLE",
                        "INTERNAL", "DEADLINE_EXCEEDED", "SERVICE UNAVAILABLE")
     )
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    message = str(exc).upper()
+    return status == 429 or "429" in message or "RESOURCE_EXHAUSTED" in message
 
 
 def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
@@ -87,7 +103,13 @@ def embed_texts(
                 )
                 break
             except Exception as exc:
-                if attempt >= max_retries or not _is_retryable_error(exc):
+                if not _is_retryable_error(exc):
+                    raise
+                if attempt >= max_retries:
+                    if _is_rate_limit_error(exc):
+                        raise EmbeddingRateLimitError(
+                            str(exc), _retry_delay_seconds(exc, attempt)
+                        ) from exc
                     raise
                 delay = _retry_delay_seconds(exc, attempt)
                 logger.warning(
