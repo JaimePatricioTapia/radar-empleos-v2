@@ -265,3 +265,85 @@ Una versión solo se considera lista para integrar cuando:
 - El evaluador recibe una instrucción explícita para tratar publicaciones y fragmentos del CV como datos no confiables y no obedecer instrucciones incrustadas.
 - Los cambios se fusionaron en `feature/streamlit-cloud-deployment` mediante PR #14, commit `44f0e509613d52297a945828eacc23ac6625310a`.
 - GitHub Actions aprobó compilación y pruebas automatizadas tanto en el PR como en la rama de despliegue. La validación visual/funcional desde Streamlit Community Cloud sigue pendiente porque el entorno de ejecución alojado no pudo inspeccionarse desde esta sesión.
+
+
+## 13. Metodología de identificación de cargos desde el CV (CHG-2026-006)
+
+### 13.1 Decisión de arquitectura
+
+El campo «Cargo objetivo» deja de ser el único generador de consultas. El Radar debe construir un perfil ocupacional a partir de la versión activa del CV y derivar familias funcionales de búsqueda. Los cargos que el usuario haya indicado se conservan como señales de prioridad, pero no son una barrera para descubrir oportunidades con otros títulos.
+
+La primera implementación será determinística y auditable, sin añadir consumo de Gemini ni embeddings adicionales: utiliza el texto de los fragmentos del CV ya almacenados para reconocer evidencia de funciones, herramientas, sectores y responsabilidades. No debe inferir certificaciones, niveles de dominio, resultados cuantificados ni experiencia que no esté respaldada por el CV. Una evolución con extracción generativa requerirá presupuesto y aprobación separados.
+
+### 13.2 Perfil ocupacional derivado
+
+El perfil se compone de:
+- funciones y responsabilidades demostrables;
+- competencias y herramientas explícitas;
+- sectores/industrias con experiencia acreditada;
+- familias funcionales de cargos y sus sinónimos locales;
+- nivel de prioridad y evidencia del CV que justifica cada familia;
+- preferencias y exclusiones del usuario (ubicación, modalidad, sectores/cargos excluidos, salario cuando esté configurado).
+
+Cada familia tendrá: identificador, nombre funcional, prioridad, títulos equivalentes, términos de competencias/dominio, evidencia que la activó y consultas emitidas. El resultado será reproducible para un mismo CV y versión de reglas.
+
+### 13.3 Familias iniciales a evaluar
+
+La configuración inicial debe considerar, sin asumir que todas son automáticamente elegibles:
+1. Análisis de negocio y procesos: Business Analyst, Analista de Negocios, Analista de Procesos, Analista Funcional.
+2. Proyectos y transformación TI: Jefe/Coordinador de Proyectos TI, Project Manager TI, PMO, Transformación Digital.
+3. Tecnología minera y sistemas operacionales: Analista TI Minería, Sistemas Mineros, Tecnología/Transformación Operacional.
+4. Riesgo tecnológico y seguridad TI: Analista de Riesgo Tecnológico, Seguridad TI, Ciberseguridad (solo si las funciones del CV lo respaldan).
+5. Datos y analítica: Analista de Datos, BI y analítica (ponderando las herramientas y el nivel real declarado).
+6. Producto digital: Product Owner, Analista de Producto, Product Manager (sin atribuir experiencia no demostrada).
+
+Los cargos Scrum Master y roles de salud/Banco Santander no deben ser propuestos como objetivos prioritarios por las exclusiones vigentes. La ingeniería minera y la experiencia operacional deben permanecer como ventaja diferenciadora y no quedar ocultas por la trayectoria TI.
+
+### 13.4 Generación y ejecución de consultas
+
+- Generar términos en español e inglés cuando sean pertinentes al mercado chileno.
+- Buscar por función y sinónimos, no solo por coincidencia literal del título.
+- Combinar títulos con competencias y dominio cuando el portal admita consultas compuestas.
+- Aplicar prioridad y límite de consultas por portal para proteger la cuota gratuita y evitar ráfagas.
+- LinkedIn conserva una consulta booleana agrupada por ejecución; otros portales reciben consultas individuales controladas.
+- Guardar en metadatos de la oferta la familia y consulta de origen, sin cambiar el esquema de Supabase.
+- Mostrar al usuario las familias priorizadas, los títulos consultados y el origen de cada oferta.
+- Las preferencias explícitas siguen filtrando oportunidades; los cargos objetivo previos actúan como pistas de búsqueda, no como lista cerrada.
+
+### 13.5 Evaluación y ranking
+
+La identificación de familia solo amplía el descubrimiento. No equivale a afinidad. Cada aviso debe seguir evaluándose contra la descripción completa y evidencia recuperada del CV, con brechas obligatorias/deseables y competencias directas/transferibles diferenciadas. El umbral de recomendación continúa en 85%; similitud de palabras, embeddings o pertenencia a una familia no pueden por sí solos generar una recomendación. Los resultados bajo el umbral se conservan con trazabilidad.
+
+### 13.6 Requisitos nuevos
+
+| ID | Requisito | Criterio de aceptación | Prioridad |
+|---|---|---|---|
+| RF-033 | Perfil ocupacional derivado del CV | El Radar analiza la versión activa del CV y produce funciones, competencias, herramientas, sectores y evidencia; no solicita volver a cargar el CV ni usa Gemini/embeddings adicionales para esta extracción inicial. | Crítica |
+| RF-034 | Familias funcionales de cargos | Se generan familias priorizadas con títulos equivalentes, sinónimos ES/EN, términos de dominio y evidencia de CV; las familias sin evidencia suficiente se excluyen o se etiquetan como exploratorias. | Crítica |
+| RF-035 | Cargo objetivo no excluyente | Los cargos configurados por el usuario se conservan como señales de prioridad, pero la búsqueda también incluye familias sustentadas por el CV. | Crítica |
+| RF-036 | Consultas trazables por familia | Cada consulta registra familia, términos y prioridad; las ofertas nuevas conservan la procedencia en metadatos existentes, sin migración de base de datos. | Alta |
+| RF-037 | Preferencias y exclusiones | Ubicación, modalidad, sectores/cargos excluidos y demás restricciones explícitas se aplican como filtros; no se recomienda una oportunidad incompatible solo por alta afinidad técnica. | Crítica |
+| RF-038 | Control de expansión de consultas | El generador limita consultas por familia y portal, conserva LinkedIn agrupado, respeta cuotas gratuitas y comunica consultas planeadas/ejecutadas/omitidas. | Crítica |
+
+### 13.7 Visualización y pruebas
+
+Añadir VIS-015: «Perfil ocupacional y familias de búsqueda», con evidencia de las familias priorizadas, títulos equivalentes, términos, prioridad y fundamento resumido del CV. La vista no debe exponer el CV completo ni fragmentos sensibles.
+
+| ID prueba | Escenario | Resultado esperado |
+|---|---|---|
+| QA-037 | CV con experiencia BA, banca digital y minería | Se identifican familias BA/procesos, proyectos TI y minería/operaciones cuando exista evidencia textual. |
+| QA-038 | CV sin experiencia explícita en ciberseguridad avanzada | No se presenta como competencia acreditada ni se inventa seniority; como máximo se clasifica como exploratoria si existe evidencia adyacente. |
+| QA-039 | Cargos objetivo vacíos o demasiado estrechos | Se generan consultas desde las familias sustentadas por el CV. |
+| QA-040 | Cargos objetivo personalizados | Se conservan como señales adicionales sin eliminar familias derivadas. |
+| QA-041 | Exclusión de Scrum Master, salud y empleadores excluidos | No se generan objetivos prioritarios ni se recomiendan ofertas que infrinjan exclusiones. |
+| QA-042 | Misma versión de CV y reglas | El perfil y las consultas son reproducibles, sin llamadas generativas adicionales. |
+| QA-043 | Oferta descubierta por alias de una familia | Se conserva family_id/family_name/query_origin en raw_metadata y se muestra la procedencia. |
+| QA-044 | Oferta con título coincidente pero requisitos no acreditados | La familia no fuerza la afinidad; la evaluación completa decide y el umbral >=85% se mantiene. |
+| QA-045 | Expansión de familias en múltiples portales | Se aplican topes, LinkedIn agrupado, deduplicación y reporte de consultas planeadas/completadas/omitidas. |
+
+### 13.8 Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-006 | 2026-11-23 | RF-033–RF-038, VIS-015, QA-037–QA-045 | El propietario autoriza incorporar al Radar la metodología de ai-job-search: perfil desde CV, familias funcionales priorizadas, alias/términos de búsqueda, descubrimiento por competencias y dominio, trazabilidad de consultas y evaluación final contra el CV completo. Se mantienen 85%, 14 días, operación gratuita, progreso/detención segura y esquema Supabase existente. | En implementación en rama feature/cv-derived-role-families; pendiente CI, revisión y smoke test cloud. |
+
