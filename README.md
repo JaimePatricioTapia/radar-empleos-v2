@@ -46,3 +46,18 @@ El esquema reproducible está en supabase/schema.sql. Aplicar SOLO en el proyect
 ## Principio de evaluación
 
 Los embeddings ayudan a recuperar fragmentos relevantes; no determinan por sí solos la compatibilidad ni el veredicto. La evaluación combina evidencia recuperada, restricciones explícitas y Gemini. El benchmark humano será la referencia para medir calidad.
+
+
+## Operación con planes gratuitos (presupuesto $0)
+
+El Radar debe funcionar exclusivamente con planes gratuitos. No se debe activar facturación ni incorporar proveedores de pago.
+
+Protecciones incorporadas en la rama de optimización:
+- Filtros locales y preselección por pertinencia antes de solicitar embeddings o evaluaciones generativas.
+- Embeddings en lotes; cada sublote exitoso se guarda inmediatamente en Supabase.
+- Reintentos limitados ante errores transitorios de Gemini, respetando el `retryDelay` del proveedor.
+- Reanudación por índice de fragmento: los embeddings ya guardados no se vuelven a calcular.
+- Topes preventivos internos de **250 fragmentos de ofertas** y **15 evaluaciones** por ventana móvil de 24 horas. Son límites conservadores del Radar, no una promesa de cuota oficial de Google.
+- Al alcanzar el tope, la búsqueda se pausa sin borrar resultados ni seguir consumiendo cuota; quedan pendientes para una ejecución posterior.
+
+La evaluación del CV utiliza embeddings al procesarlo. No vuelva a cargar el mismo CV sin necesidad; primero verifique si ya está activo. La configuración de modelo y dimensiones debe mantenerse compatible con el esquema de Supabase (3072 dimensiones).
