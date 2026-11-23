@@ -239,3 +239,24 @@ def test_html_publication_date_extractor_reads_explicit_date():
         "html.parser",
     ).article
     assert _extract_published_at(card) == "2026-11-22T09:00:00Z"
+
+
+
+def test_source_circuit_breaker_skips_remaining_queries_after_two_consecutive_errors(monkeypatch):
+    from src.search import ingestion
+
+    bne = Mock(side_effect=RuntimeError("BNE timeout"))
+    monkeypatch.setitem(ingestion.CONNECTORS, "bne", bne)
+    progress = []
+    result = ingestion.run_discovery(
+        _EmptyClient(), user_id="user-1",
+        roles=["Business Analyst", "Analista Funcional", "Project Manager"],
+        sources=["bne"], on_progress=progress.append,
+    )
+
+    assert bne.call_count == 2
+    assert result["errors"] == 2
+    assert result["queries_completed"] == 2
+    assert result["queries_skipped"] == 1
+    assert result["by_source"]["bne"]["skipped_queries"] == 1
+    assert progress[-1]["status"] == "source_skipped"
