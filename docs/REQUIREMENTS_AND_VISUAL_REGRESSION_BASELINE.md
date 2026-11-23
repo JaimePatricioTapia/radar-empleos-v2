@@ -86,6 +86,9 @@ Toda modificación debe:
 | RF-027 | Recuperación de errores de proveedor | Los errores transitorios 429/5xx respetan retryDelay y backoff; los errores permanentes no se reintentan indefinidamente. | Alta |
 | RF-028 | Estado y progreso observable en tiempo real | Durante la ejecución integral se muestra una barra de progreso basada en eventos reales, etapa actual, portal, cargo/consulta, consultas completadas y pendientes, ofertas encontradas/nuevas/duplicadas, errores, tiempo transcurrido y hora de última actualización. El estado se actualiza al terminar cada consulta/lote y no debe aparentar avance cuando una operación está bloqueada. | Crítica |
 | RF-029 | Detención controlada y procesamiento parcial | Durante la búsqueda, el usuario puede solicitar «Detener y procesar resultados». La aplicación deja de iniciar nuevas consultas después de finalizar o agotar el tiempo de espera de la consulta en curso, persiste el avance, cierra ordenadamente el descubrimiento y continúa automáticamente con preparación semántica y evaluación de todas las ofertas recopiladas. No descarta ni revierte ofertas, embeddings o evaluaciones ya persistidos; lo que quede pendiente debe poder reanudarse. | Crítica |
+| RF-030 | Antigüedad máxima de publicaciones | La búsqueda aplica una ventana de 14 días: descarta ofertas con fecha de publicación verificable anterior al límite; cuando el portal no expone fecha, el aviso se marca explícitamente como fecha no verificada y se contabiliza por separado, sin afirmar que cumple la ventana. | Crítica |
+| RF-031 | Ofertas nuevas visibles durante descubrimiento | Cada oferta nueva confirmada en Supabase se refleja en el panel de ejecución sin esperar a que terminen todas las consultas. | Alta |
+| RF-032 | Ejecución no bloqueante y eventos reales | El proceso se ejecuta fuera del hilo de renderizado de Streamlit; la interfaz consulta eventos de progreso y mantiene disponibles los controles de detención. El progreso refleja consultas/etapas realmente completadas, no tiempo estimado. | Crítica |
 
 ## 4. Requisitos de clasificación de ofertas
 
@@ -129,6 +132,7 @@ La siguiente lista es el inventario funcional que debe tener evidencia visual. L
 | VIS-011 | Ejecución cloud | Aplicación iniciada desde la URL Streamlit, pantalla de acceso y estado de servicio sin revelar secretos. |
 | VIS-012 | Carga cloud del CV | Selector de archivo PDF, confirmación de procesamiento y resultado; no mostrar contenido sensible ni ruta del servidor. |
 | VIS-013 | Progreso y control de ejecución | Barra de progreso y panel de estado con etapa, portal/cargo/consulta actual, contadores de consultas y ofertas, errores, última actualización y acción «Detener y procesar resultados» mientras la búsqueda esté activa. Debe distinguir ejecución activa, espera/reintento, detención solicitada, procesamiento parcial, completado y error recuperable. |
+| VIS-014 | Ofertas descubiertas en vivo | Lista de últimas ofertas recién persistidas, con portal y estado de verificación de fecha, actualizada durante el descubrimiento. |
 
 ### 5.1 Capturas de referencia
 Guardar capturas aprobadas en `docs/visual-baseline/` con nombres estables:
@@ -179,6 +183,10 @@ Las capturas deben:
 | QA-030 | Progreso real de búsqueda | Al completar consultas se actualizan etapa, portal, cargo, contadores y última actividad; los errores y reintentos se identifican. La barra no aumenta por tiempo transcurrido ni muestra porcentajes inventados. | Crítica |
 | QA-031 | Detener y procesar resultados parciales | Al solicitar la detención durante descubrimiento, no se inician nuevas consultas tras cerrar la actual; las ofertas ya encontradas permanecen persistidas y se ejecutan preparación y evaluación automáticamente sobre el conjunto recopilado. | Crítica |
 | QA-032 | Recuperación después de detener | Si falla la preparación/evaluación posterior o se interrumpe la sesión, se conservan resultados y lotes completados; al reanudar se procesan solo pendientes, sin duplicar ofertas ni repetir embeddings/evaluaciones ya guardados. | Crítica |
+| QA-033 | Ventana de 14 días | Una oferta con fecha de 15 días se descarta; una de 14 días o menos puede continuar; una fecha desconocida se contabiliza y etiqueta sin presentarla como verificada. | Crítica |
+| QA-034 | Progreso en segundo plano | La búsqueda continúa mientras la interfaz muestra eventos y permite solicitar detención; ningún callback de trabajo llama directamente a Streamlit desde el hilo de fondo. | Crítica |
+| QA-035 | Oferta incremental | Tras persistir una oferta nueva, aparece en el feed de ejecución antes de que finalice el resto del descubrimiento. | Alta |
+| QA-036 | Contenido de oferta malicioso | Instrucciones incrustadas en la descripción de un aviso no alteran el prompt, las reglas ni el resultado del evaluador; el texto externo se trata como dato no confiable. | Crítica |
 
 ## 7. Procedimiento de auditoría visual por versión
 
@@ -230,6 +238,7 @@ Mantener un registro por cambio con esta estructura:
 | CHG-2026-002 | 2026-11-22 | RF-019–RF-022, VIS-011–VIS-012, QA-021–QA-024 | El propietario autorizó preparar Radar 2.0 para Streamlit Community Cloud, mantener GitHub privado, procesar CV mediante carga temporal y aislar clientes de Supabase por sesión. No autoriza hacer público el repositorio ni cambiar el esquema de Supabase. | Aprobado para implementación; pendiente de pruebas integradas y autorización GitHub/Streamlit. |
 | CHG-2026-003 | 2026-11-23 | RF-025–RF-027, QA-025–QA-029 | El propietario ordenó priorizar operación exclusivamente gratuita y optimización estricta de cuota. Se autorizó auditoría comparativa con Radar original, filtros locales, presupuestos preventivos, reintentos con retryDelay y persistencia incremental/reanudable de embeddings. No se autorizan servicios pagados ni cambios de esquema Supabase. | Implementado y fusionado mediante PR #10; 51 pruebas aprobadas. Pendiente smoke test en la URL pública de Streamlit. |
 | CHG-2026-004 | 2026-11-23 | RF-028–RF-029, VIS-013, QA-030–QA-032 | El propietario solicita visibilidad verificable del avance durante la búsqueda y una acción segura para detener el descubrimiento y procesar automáticamente las ofertas recopiladas, preservando persistencia incremental y reanudación. | Aprobado para especificación; implementación y pruebas pendientes. |
+| CHG-2026-005 | 2026-11-23 | RF-030–RF-032, VIS-014, QA-033–QA-036 | El propietario autoriza incorporar una ventana de 14 días, feed incremental de ofertas, ejecución en segundo plano, parada cooperativa y frontera de confianza para contenido externo. Se conserva el umbral 85%, la operación gratuita y la arquitectura Supabase existente. | Implementación en rama feature/radar-14d-progress-resume; pruebas CI y smoke test cloud pendientes. |
 
 Las nuevas decisiones se agregan como filas; no se sobrescriben decisiones históricas. Toda modificación futura de este documento requiere presentar previamente la propuesta al propietario y esperar su autorización explícita.
 
@@ -243,3 +252,15 @@ Una versión solo se considera lista para integrar cuando:
 - el repositorio y secretos siguen protegidos;
 - el propietario aprueba el Pull Request.
 
+
+
+## 12. Notas de implementación de la mejora de búsqueda reciente
+
+- JobSpy recibe el filtro nativo `hours_old=336` para LinkedIn e Indeed, además del control de antigüedad aplicado por el orquestador.
+- El orquestador normaliza fechas ISO, fechas de calendario y expresiones relativas en español/inglés; descarta publicaciones verificablemente más antiguas de 14 días.
+- Las fuentes que no informan una fecha fiable no se etiquetan falsamente como recientes: se conservan con `publication_date_status=unknown` y se contabilizan por separado para no perder oportunidades potencialmente vigentes.
+- Las ofertas nuevas se emiten al feed después de confirmarse su persistencia.
+- Un portal que acumula dos errores consecutivos omite las consultas restantes de esa fuente y permite que los otros portales continúen; el panel informa las consultas omitidas.
+- La búsqueda y el procesamiento se ejecutan en un hilo de trabajo; el hilo de interfaz recibe eventos y puede solicitar detener el descubrimiento tras la consulta actual. La preparación y evaluación continúan con el conjunto persistido.
+- El evaluador recibe una instrucción explícita para tratar publicaciones y fragmentos del CV como datos no confiables y no obedecer instrucciones incrustadas.
+- Estos cambios están en una rama de trabajo y no se consideran desplegados hasta aprobar CI, integrar la rama y verificar Streamlit Community Cloud.

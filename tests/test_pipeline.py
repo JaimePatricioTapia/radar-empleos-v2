@@ -148,3 +148,46 @@ def test_full_pipeline_pauses_cleanly_when_embedding_quota_stays_exhausted():
     assert result["completed"] is False
     assert result["preparation"]["pending_remaining"] == 1
     assert "429" in result["preparation"]["api_quota_message"]
+
+
+
+def test_pipeline_emits_ordered_stage_events_and_processes_partial_discovery():
+    client = _Client()
+    events = []
+    with (
+        patch.object(pipeline, "get_settings", return_value=SimpleNamespace(
+            max_daily_job_chunks=250, max_daily_evaluations=15
+        )),
+        patch.object(pipeline, "run_discovery", return_value={
+            "total_found": 3, "saved": 2, "errors": 0, "queries": 5,
+            "queries_completed": 2, "queries_skipped": 0, "stopped_early": True,
+            "by_source": {}, "error_details": [],
+        }),
+        patch.object(pipeline, "get_processing_status", side_effect=[
+            {"pending_chunking": 0, "daily_chunk_budget_remaining": 250},
+            {"pending_chunking": 0, "daily_chunk_budget_remaining": 250},
+        ]),
+        patch.object(pipeline, "evaluate_top_offers", return_value={
+            "ranked": 2, "evaluated": 2, "below_threshold": 1,
+            "skipped_existing": 0, "skipped_excluded": 0,
+            "errors": [], "results": [], "budget_exhausted": False,
+            "budget_remaining": 13,
+        }),
+    ):
+        result = pipeline.run_full_search_pipeline(
+            client, user_id="user-1", roles=["Business Analyst"],
+            sources=["linkedin"], on_progress=events.append,
+        )
+
+    stages = [(event["stage"], event["status"]) for event in events]
+    assert stages == [
+        ("discovery", "partial"),
+        ("preparation", "running"),
+        ("preparation", "completed"),
+        ("evaluation", "running"),
+        ("evaluation", "running"),
+        ("evaluation", "completed"),
+    ]
+    assert result["stopped_early"] is True
+    assert result["completed"] is False
+    assert result["evaluation"]["evaluated"] == 2

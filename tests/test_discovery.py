@@ -29,8 +29,12 @@ def test_hash_is_stable_for_same_canonical_url():
     assert _stable_hash(a) == _stable_hash(b)
 
 
-def test_relative_published_date_is_not_fabricated():
-    assert _parse_published_at("hace 3 días") is None
+def test_relative_published_date_is_parsed_without_fabricating_unknown_dates():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+    assert _parse_published_at("hace 3 días", now=now) == "2026-11-20T12:00:00+00:00"
+    assert _parse_published_at("hace 2 meses", now=now) == "2026-09-24T12:00:00+00:00"
+    assert _parse_published_at("fecha desconocida", now=now) is None
 
 
 def test_iso_published_date_is_normalized():
@@ -59,6 +63,7 @@ def test_jobspy_calls_only_the_requested_portal_and_does_not_fetch_details(monke
     kwargs = scrape.call_args.kwargs
     assert kwargs["site_name"] == ["linkedin"]
     assert kwargs["fetch_description"] is False
+    assert kwargs["hours_old"] == 336
     assert "linkedin_fetch_description" not in kwargs
 
 
@@ -136,3 +141,123 @@ def test_linkedin_failure_does_not_stop_other_portals(monkeypatch):
     assert indeed.call_count == 2
     assert result["errors"] == 1
     assert result["by_source"]["indeed"]["errors"] == 0
+
+
+
+def test_english_relative_publication_dates_are_parsed():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+    assert _parse_published_at("2 days ago", now=now) == "2026-11-21T12:00:00+00:00"
+
+
+class _EmptyQuery:
+    def select(self, *_args, **_kwargs):
+        return self
+
+    def eq(self, *_args, **_kwargs):
+        return self
+
+    def limit(self, *_args, **_kwargs):
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=[])
+
+
+class _EmptyClient:
+    def table(self, _name):
+        return _EmptyQuery()
+
+
+def test_discovery_discards_explicitly_old_offers_and_emits_saved_offer(monkeypatch):
+    from src.search import ingestion
+
+    now_recent = "hace 2 días"
+    old = "hace 20 días"
+    connector = Mock(return_value=[
+        {"title": "Business Analyst reciente", "company": "Empresa A",
+         "source": "linkedin", "source_url": "https://example.com/recent",
+         "published_at": now_recent, "description": "Descripción"},
+        {"title": "Business Analyst antiguo", "company": "Empresa B",
+         "source": "linkedin", "source_url": "https://example.com/old",
+         "published_at": old, "description": "Descripción"},
+        {"title": "Business Analyst sin fecha", "company": "Empresa C",
+         "source": "linkedin", "source_url": "https://example.com/unknown",
+         "published_at": None, "description": "Descripción"},
+    ])
+    monkeypatch.setitem(ingestion.CONNECTORS, "linkedin", connector)
+    monkeypatch.setattr(ingestion, "upsert_job_offer", lambda _client, user_id, offer: {
+        "id": offer["source_url"], "title": offer["title"], "company": offer["company"],
+        "location": None, "source": "linkedin", "source_url": offer["source_url"],
+        "published_at": offer.get("published_at"),
+    })
+    emitted = []
+
+    result = ingestion.run_discovery(
+        _EmptyClient(), user_id="user-1", roles=["Business Analyst"],
+        sources=["linkedin"], on_offer=emitted.append,
+    )
+
+    assert result["saved"] == 2
+    assert result["stale_skipped"] == 1
+    assert result["publication_date_unknown"] == 1
+    assert len(emitted) == 2
+    assert emitted[1]["publication_date_status"] == "unknown"
+
+
+def test_discovery_stop_finishes_current_query_and_skips_next_queries(monkeypatch):
+    from threading import Event
+    from src.search import ingestion
+
+    stop = Event()
+    linkedin = Mock(side_effect=lambda *_args, **_kwargs: (stop.set() or []))
+    indeed = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "linkedin", linkedin)
+    monkeypatch.setitem(ingestion.CONNECTORS, "indeed", indeed)
+    progress = []
+
+    result = ingestion.run_discovery(
+        _EmptyClient(), user_id="user-1",
+        roles=["Business Analyst", "Analista Funcional"],
+        sources=["linkedin", "indeed"],
+        should_stop=stop.is_set, on_progress=progress.append,
+    )
+
+    assert result["stopped_early"] is True
+    assert result["queries_completed"] == 1
+    assert linkedin.call_count == 1
+    assert indeed.call_count == 0
+    assert progress[-1]["queries_completed"] == 1
+
+
+
+def test_html_publication_date_extractor_reads_explicit_date():
+    from bs4 import BeautifulSoup
+    from src.search.sources import _extract_published_at
+
+    card = BeautifulSoup(
+        '<article><time datetime="2026-11-22T09:00:00Z">Publicado ayer</time></article>',
+        "html.parser",
+    ).article
+    assert _extract_published_at(card) == "2026-11-22T09:00:00Z"
+
+
+
+def test_source_circuit_breaker_skips_remaining_queries_after_two_consecutive_errors(monkeypatch):
+    from src.search import ingestion
+
+    bne = Mock(side_effect=RuntimeError("BNE timeout"))
+    monkeypatch.setitem(ingestion.CONNECTORS, "bne", bne)
+    progress = []
+    result = ingestion.run_discovery(
+        _EmptyClient(), user_id="user-1",
+        roles=["Business Analyst", "Analista Funcional", "Project Manager"],
+        sources=["bne"], on_progress=progress.append,
+    )
+
+    assert bne.call_count == 2
+    assert result["errors"] == 2
+    assert result["queries_completed"] == 2
+    assert result["queries_skipped"] == 1
+    assert result["by_source"]["bne"]["skipped_queries"] == 1
+    assert progress[-1]["status"] == "source_skipped"

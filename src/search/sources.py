@@ -21,6 +21,10 @@ HEADERS = {
     "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
 }
 TIMEOUT = 18
+DETAIL_TIMEOUT = 8
+DETAIL_ENRICHMENT_LIMIT = 4
+BNE_SEARCH_TIMEOUT = 12
+BNE_DETAIL_TIMEOUT = 6
 
 
 def clean_text(value: Any) -> str:
@@ -71,8 +75,30 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
     }
 
 
+def _extract_published_at(container) -> str | None:
+    """Obtiene fechas explícitas de tarjetas HTML sin inferirlas desde el orden."""
+    if container is None:
+        return None
+    selectors = (
+        "time[datetime]", "time", "[data-date]", "[data-published]",
+        ".date", ".fecha", ".posted", ".publication-date",
+    )
+    for selector in selectors:
+        element = container.select_one(selector)
+        if element is None:
+            continue
+        value = (
+            element.get("datetime") or element.get("data-date")
+            or element.get("data-published") or element.get_text(" ", strip=True)
+        )
+        if value:
+            return str(value).strip()
+    return None
+
+
 def _request_get(url: str, **kwargs):
-    return requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
+    timeout = kwargs.pop("timeout", TIMEOUT)
+    return requests.get(url, headers=HEADERS, timeout=timeout, **kwargs)
 
 
 def search_jobspy_site(query: str, *, site: str, limit: int = 15,
@@ -91,6 +117,7 @@ def search_jobspy_site(query: str, *, site: str, limit: int = 15,
         search_term=query,
         location=location,
         results_wanted=limit,
+        hours_old=336,
         country_indeed="Chile",
         fetch_description=False,
         verbose=0,
@@ -175,9 +202,9 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
         location = card.select_one(".city, .ciudad, a[href*='/ciudad/']")
         summary = card.select_one("p, .text, .description")
         description = summary.get_text(" ", strip=True) if summary else ""
-        if len(description) < 120 and url:
+        if len(description) < 120 and url and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
-                detail = _request_get(url)
+                detail = _request_get(url, timeout=DETAIL_TIMEOUT)
                 if detail.ok:
                     detail_soup = BeautifulSoup(detail.text, "html.parser")
                     body = detail_soup.select_one(".job-description, .descripcion, article, .content")
@@ -189,7 +216,7 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
             source="chiletrabajos", title=link.get_text(" ", strip=True), url=url,
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
-            description=description,
+            description=description, published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -220,6 +247,7 @@ def search_computrabajo(query: str, limit: int = 12) -> list[dict]:
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
             description=summary.get_text(" ", strip=True) if summary else "",
+            published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -249,6 +277,7 @@ def search_contutalento(query: str, limit: int = 12) -> list[dict]:
         offer = normalize_offer(
             source="contutalento", title=title, url=url, company=company,
             location="Chile", description="",
+            published_at=_extract_published_at(heading.find_parent(["article", "li", "div"])),
             raw_metadata={"description_status": "pendiente de enriquecimiento"},
         )
         if offer:
@@ -262,7 +291,7 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
     headers = {**HEADERS, "Accept": "application/json, text/plain, */*", "Content-Type": "application/json"}
     response = requests.post(
         "https://www.bne.cl/api/ofertas/busqueda", params={"page": 0, "size": limit},
-        json={"textoBusqueda": query}, headers=headers, timeout=TIMEOUT,
+        json={"textoBusqueda": query}, headers=headers, timeout=BNE_SEARCH_TIMEOUT,
     )
     response.raise_for_status()
     results = []
@@ -273,10 +302,10 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
         employer, region, commune = item.get("empresario") or {}, item.get("region") or {}, item.get("comuna") or {}
         schedule = item.get("jornadaLaboral") or {}
         description = str(item.get("descripcion") or "")
-        if len(description) < 150:
+        if len(description) < 150 and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
                 detail = requests.get(f"https://www.bne.cl/api/ofertas/publica/{offer_id}",
-                                      headers=headers, timeout=10)
+                                      headers=headers, timeout=BNE_DETAIL_TIMEOUT)
                 if detail.ok:
                     description = str(detail.json().get("descripcion") or description)
             except requests.RequestException:
@@ -308,6 +337,7 @@ def search_codelco(query: str, limit: int = 12) -> list[dict]:
             source="codelco", title=title, url=urljoin(base, link.get("href", "")),
             company="Codelco", location=row.get_text(" ", strip=True) if row else "Chile",
             description="",
+            published_at=_extract_published_at(row or link.parent),
         )
         if offer:
             results.append(offer)
