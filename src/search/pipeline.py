@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Any
 
+from src.config import get_settings
 from src.search.ingestion import run_discovery
 from src.search.processing import (
     build_job_chunks,
@@ -20,14 +21,13 @@ def run_full_search_pipeline(
     limit_per_query: int = 10,
     progress: Callable[[str], None] | None = None,
     chunk_batch_size: int = 100,
-    evaluation_batch_size: int = 15,
+    evaluation_batch_size: int = 1000,
 ) -> dict:
     """Ejecuta las etapas completas; conserva en DB cada resultado confirmado.
 
-    Los lotes se repiten hasta no tener ofertas pendientes. La evaluación se
-    pagina de forma lógica: cada lote evaluado deja de aparecer en el RPC de
-    pendientes para el CV activo. Si una etapa no progresa o reporta errores,
-    se detiene para evitar ciclos infinitos y permitir reintentar con seguridad.
+    Los lotes se repiten hasta completar el trabajo o alcanzar el presupuesto
+    gratuito móvil de 24 horas. Cada sublote confirmado queda guardado y puede
+    reanudarse sin recalcular fragmentos ya persistidos.
     """
     active_cv = (
         client.table("cv_versions")
@@ -132,7 +132,8 @@ def run_full_search_pipeline(
         "budget_remaining": 15,
     }
     report("Etapa 3/3 · Comparando requisitos de las ofertas con evidencia del CV…")
-    evaluation_limit = max(1, min(int(evaluation_batch_size), 15))
+    configured_daily_limit = max(1, int(get_settings().max_daily_evaluations))
+    evaluation_limit = max(1, min(int(evaluation_batch_size), configured_daily_limit))
     while True:
         batch = evaluate_top_offers(
             client,
