@@ -246,6 +246,7 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
 
     # Priorizar localmente cargos y contexto minero; no se descartan ofertas por esta puntuación.
     eligible.sort(key=lambda item: (_local_relevance_score(item[0]), item[0].get("captured_at") or ""), reverse=True)
+    eligible = eligible[:max(1, int(limit))]
     selected: list[tuple[dict, list[dict]]] = []
     chunk_rows: list[dict] = []
     for offer, missing in eligible:
