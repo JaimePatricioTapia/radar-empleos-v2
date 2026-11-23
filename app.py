@@ -238,9 +238,10 @@ def render_search_task():
                 f"Pendientes: **{event.get('pending_remaining', 'calculando')}**"
             )
             if event.get("chunks_total"):
-                st.caption(
-                    f"Embeddings persistidos en este lote: {event.get('chunks_saved', 0)}/"
-                    f"{event.get('chunks_total', 0)} · Lote {event.get('embedding_batch', '—')}"
+                st.progress(
+                    min(1.0, event.get("chunks_saved", 0) / max(1, event.get("chunks_total", 1))),
+                    text=f"Lote de embeddings {event.get('embedding_batch', '—')}: "
+                         f"{event.get('chunks_saved', 0)}/{event.get('chunks_total', 0)} fragmentos persistidos",
                 )
         else:
             fraction = 2 / 3 if event.get("status") != "completed" else 1.0
@@ -251,9 +252,10 @@ def render_search_task():
                 f"Incidencias: **{event.get('errors', 0)}**"
             )
             if event.get("offers_total"):
-                st.caption(
-                    f"Ofertas revisadas en este lote: {event.get('offers_processed', 0)}/"
-                    f"{event.get('offers_total', 0)}"
+                st.progress(
+                    min(1.0, event.get("offers_processed", 0) / max(1, event.get("offers_total", 1))),
+                    text=f"Ofertas revisadas en este lote: {event.get('offers_processed', 0)}/"
+                         f"{event.get('offers_total', 0)}",
                 )
 
         if stage == "discovery":
