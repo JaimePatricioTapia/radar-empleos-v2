@@ -246,7 +246,7 @@ def render_search_task():
             st.write(
                 f"Evaluadas: **{event.get('evaluated', 0)}** · "
                 f"Preseleccionadas: **{event.get('ranked', 0)}** · "
-                f"Incidencias: **{event.get('errors', 0)}"
+                f"Incidencias: **{event.get('errors', 0)}**"
             )
             if event.get("offers_total"):
                 st.caption(
