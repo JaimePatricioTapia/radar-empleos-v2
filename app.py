@@ -88,10 +88,16 @@ if st.button("Procesar mi CV", type="primary", disabled=uploaded_cv is None):
     with st.spinner("Leyendo CV, generando embeddings y guardando información..."):
         try:
             result = ingest_cv_upload(uploaded_cv.getvalue(), uploaded_cv.name, client=client, user_id=user["id"])
-            st.success("CV procesado y guardado correctamente.")
+            st.success(
+                "CV ya procesado: se reutilizaron sus embeddings existentes sin consumir cuota."
+                if result.get("cached")
+                else "CV procesado y guardado correctamente."
+            )
             st.metric("Fragmentos guardados", result["chunk_count"])
             st.caption(f"Versión: {result['cv_version_id']} · Modelo: {result['embedding_model']}")
             st.caption(f"SHA-256: {result['cv_hash']}")
+            if result.get("cached"):
+                st.caption("Caché activa por hash SHA-256 y modelo de embeddings.")
         except Exception as exc:
             st.error(f"No se pudo procesar el CV: {type(exc).__name__}: {exc}")
 st.divider()
@@ -354,5 +360,7 @@ if evaluate_submitted:
                     with st.expander(f"{item['section']} · similitud {item.get('similarity', 0):.3f}"):
                         st.write(item["text"])
                 st.caption(f"Modelo: {result['model']} · Prompt: {result['prompt_version']} · ID evaluación: {result['evaluation_id']}")
+                if result.get("cached"):
+                    st.caption("Resultado recuperado del historial; no se realizaron llamadas a Gemini.")
             except Exception as exc:
                 st.error(f"No se pudo completar la evaluación: {exc}")
