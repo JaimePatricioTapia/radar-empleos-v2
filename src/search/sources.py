@@ -21,7 +21,10 @@ HEADERS = {
     "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
 }
 TIMEOUT = 18
+DETAIL_TIMEOUT = 8
+DETAIL_ENRICHMENT_LIMIT = 4
 BNE_SEARCH_TIMEOUT = 12
+BNE_DETAIL_TIMEOUT = 6
 
 
 def clean_text(value: Any) -> str:
@@ -94,7 +97,8 @@ def _extract_published_at(container) -> str | None:
 
 
 def _request_get(url: str, **kwargs):
-    return requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
+    timeout = kwargs.pop("timeout", TIMEOUT)
+    return requests.get(url, headers=HEADERS, timeout=timeout, **kwargs)
 
 
 def search_jobspy_site(query: str, *, site: str, limit: int = 15,
@@ -198,9 +202,9 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
         location = card.select_one(".city, .ciudad, a[href*='/ciudad/']")
         summary = card.select_one("p, .text, .description")
         description = summary.get_text(" ", strip=True) if summary else ""
-        if len(description) < 120 and url:
+        if len(description) < 120 and url and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
-                detail = _request_get(url)
+                detail = _request_get(url, timeout=DETAIL_TIMEOUT)
                 if detail.ok:
                     detail_soup = BeautifulSoup(detail.text, "html.parser")
                     body = detail_soup.select_one(".job-description, .descripcion, article, .content")
@@ -298,10 +302,10 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
         employer, region, commune = item.get("empresario") or {}, item.get("region") or {}, item.get("comuna") or {}
         schedule = item.get("jornadaLaboral") or {}
         description = str(item.get("descripcion") or "")
-        if len(description) < 150:
+        if len(description) < 150 and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
                 detail = requests.get(f"https://www.bne.cl/api/ofertas/publica/{offer_id}",
-                                      headers=headers, timeout=10)
+                                      headers=headers, timeout=BNE_DETAIL_TIMEOUT)
                 if detail.ok:
                     description = str(detail.json().get("descripcion") or description)
             except requests.RequestException:
