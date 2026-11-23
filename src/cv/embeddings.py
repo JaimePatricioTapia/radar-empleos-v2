@@ -11,7 +11,8 @@ from google import genai
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSIONS = 3072
-DEFAULT_EMBEDDING_BATCH_SIZE = 40
+DEFAULT_EMBEDDING_BATCH_SIZE = 90
+DEFAULT_INTER_BATCH_DELAY_SECONDS = 60
 DEFAULT_MAX_RETRIES = 4
 
 
@@ -66,6 +67,7 @@ def embed_texts(
     task_type: EmbeddingTask = "RETRIEVAL_DOCUMENT",
     output_dimensionality: int = EMBEDDING_DIMENSIONS,
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    inter_batch_delay_seconds: float = DEFAULT_INTER_BATCH_DELAY_SECONDS,
     max_retries: int = DEFAULT_MAX_RETRIES,
     on_batch: Callable[[int, list[str], list[list[float]]], None] | None = None,
 ) -> list[list[float]]:
@@ -81,6 +83,8 @@ def embed_texts(
         raise ValueError("Radar 2.0 fija los embeddings en 3.072 dimensiones.")
     if not 1 <= batch_size <= 250:
         raise ValueError("batch_size debe estar entre 1 y 250.")
+    if inter_batch_delay_seconds < 0:
+        raise ValueError("inter_batch_delay_seconds no puede ser negativo.")
     if max_retries < 0 or max_retries > 8:
         raise ValueError("max_retries debe estar entre 0 y 8.")
     if any(not isinstance(text, str) or not text.strip() for text in texts):
@@ -132,4 +136,12 @@ def embed_texts(
         if on_batch:
             on_batch(start, batch, batch_vectors)
         vectors.extend(batch_vectors)
+        # Un minuto completo entre solicitudes exitosas: margen conservador
+        # frente al límite gratuito de 100 solicitudes por minuto.
+        if start + len(batch) < len(texts) and inter_batch_delay_seconds:
+            logger.info(
+                "Lote de embeddings %s/%s completado; esperando %.0f s antes del siguiente.",
+                start + len(batch), len(texts), inter_batch_delay_seconds,
+            )
+            time.sleep(inter_batch_delay_seconds)
     return vectors
