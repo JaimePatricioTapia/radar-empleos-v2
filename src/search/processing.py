@@ -324,11 +324,14 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                    .limit(daily_evaluation_limit).execute().data or [])
     daily_remaining = max(0, daily_evaluation_limit - len(recent_rows))
     if daily_remaining == 0:
+        pending = client.rpc(
+            "rank_job_offers_by_cv", {"match_limit": 1}
+        ).execute().data or []
         return {
             "ranked": 0, "evaluated": 0, "below_threshold": 0,
             "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
             "skipped_existing": 0, "skipped_excluded": 0,
-            "errors": [], "results": [], "budget_exhausted": True,
+            "errors": [], "results": [], "budget_exhausted": bool(pending),
             "budget_remaining": 0,
         }
     cv_rows = (client.table("cv_versions").select("*").eq("user_id", user_id)
@@ -449,7 +452,12 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         reverse=True,
     )
     stats["budget_remaining"] = max(0, daily_remaining - stats["evaluated"])
-    stats["budget_exhausted"] = stats["budget_remaining"] == 0
+    if stats["budget_remaining"] == 0:
+        # Consulta pgvector/SQL sin Gemini para distinguir cuota agotada de trabajo terminado.
+        pending = client.rpc(
+            "rank_job_offers_by_cv", {"match_limit": 1}
+        ).execute().data or []
+        stats["budget_exhausted"] = bool(pending)
     return stats
 
 
