@@ -84,6 +84,11 @@ with st.sidebar:
 st.subheader("Mi currículum")
 st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")
 uploaded_cv = st.file_uploader("Seleccionar CV (PDF, máximo 15 MB)", type=["pdf"], key="cv_pdf_upload")
+st.caption(
+    f"Embeddings: {settings.embedding_model} · {settings.embedding_dimensions} dimensiones · "
+    f"Presupuesto preventivo: {settings.max_daily_job_chunks} fragmentos y "
+    f"{settings.max_daily_evaluations} evaluaciones por 24 h."
+)
 if st.button("Procesar mi CV", type="primary", disabled=uploaded_cv is None):
     with st.spinner("Leyendo CV, generando embeddings y guardando información..."):
         try:
