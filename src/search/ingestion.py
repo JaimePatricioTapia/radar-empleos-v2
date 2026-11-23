@@ -130,7 +130,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
     role_lookup = {}
     for family in role_context or []:
         for title in family.get("titles", []):
-            role_lookup[re.sub(r"\\s+", " ", str(title)).strip().casefold()] = family
+            role_lookup[re.sub(r"\s+", " ", str(title)).strip().casefold()] = family
 
     def notify(event: dict) -> None:
         if on_progress:
@@ -167,10 +167,13 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     })
                 break
             family_for_query = role_lookup.get(str(query_label).strip().casefold())
-            display_query_label = (
-                f"{family_for_query.get('family_name')} · {query_label}"
-                if family_for_query else query_label
-            )
+            if family_for_query:
+                display_query_label = f"{family_for_query.get('family_name')} · {query_label}"
+            elif source == "linkedin" and role_context:
+                family_names = ", ".join(item.get("family_name", "") for item in role_context)
+                display_query_label = f"Familias agrupadas: {family_names}"
+            else:
+                display_query_label = query_label
             if progress:
                 progress(f"Buscando «{display_query_label}» en {label}…")
             if on_progress:
