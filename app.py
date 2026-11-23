@@ -173,8 +173,13 @@ if run_pipeline:
         preparation = result["preparation"]
         evaluation = result["evaluation"]
         status.update(
-            label="Proceso integral finalizado" if result["completed"] else "Proceso finalizado con incidencias",
-            state="complete" if result["completed"] else "error",
+            label=(
+                "Proceso pausado por protección de cuota gratuita"
+                if result.get("paused_for_free_quota")
+                else "Proceso integral finalizado" if result["completed"]
+                else "Proceso finalizado con incidencias"
+            ),
+            state="complete" if result["completed"] or result.get("paused_for_free_quota") else "error",
             expanded=not result["completed"],
         )
         st.subheader("Resumen de esta ejecución")
@@ -195,6 +200,19 @@ if run_pipeline:
             f"Lotes de evaluación: {evaluation['batches']} · "
             f"Ofertas pendientes de preparación: {preparation['pending_remaining']}"
         )
+        if result.get("paused_for_free_quota"):
+            st.warning(
+                "Se alcanzó el límite preventivo gratuito configurado en Radar. "
+                "No se hicieron más llamadas a Gemini. Los resultados y fragmentos "
+                "ya guardados se conservaron; las ofertas pendientes se podrán "
+                "procesar cuando se renueve la ventana móvil de 24 horas."
+            )
+            st.caption(
+                f"Embeddings: {preparation.get('chunks_embedded_last_24h', 0)}/250 "
+                f"fragmentos en las últimas 24 h · "
+                f"Evaluaciones: {15 - evaluation.get('budget_remaining', 0)}/15 "
+                "en las últimas 24 h."
+            )
         st.subheader("Resultado por portal")
         for source, values in discovery["by_source"].items():
             st.write(
@@ -208,11 +226,14 @@ if run_pipeline:
                     st.write(f"- {error}")
                 for error in discovery["error_details"]:
                     st.write(f"- {error}")
-        st.success(
-            f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
-            if result["completed"]
-            else "Los resultados parciales quedaron guardados. Revise las incidencias antes de reintentar."
-        )
+        if result["completed"]:
+            st.success(
+                f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
+            )
+        elif result.get("paused_for_free_quota"):
+            st.info("La búsqueda quedó pausada de forma segura para proteger la cuota gratuita. Los resultados parciales están disponibles en la bandeja.")
+        else:
+            st.info("Los resultados parciales quedaron guardados. Revise las incidencias antes de reintentar.")
     except Exception as exc:
         status.update(label="El proceso se detuvo; se conservaron los resultados guardados", state="error")
         st.error(f"No se pudo completar el proceso integral: {type(exc).__name__}: {exc}")
