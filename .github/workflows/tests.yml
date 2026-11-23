@@ -1,6 +1,10 @@
 name: Python tests
 # Includes validation for the free-tier optimization branch and cloud deployment PRs.
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
