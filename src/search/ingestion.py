@@ -187,7 +187,11 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     max(limit_per_query, min(limit_per_query * len(roles), 25))
                     if source == "linkedin" else limit_per_query
                 )
-                offers = connector(query, limit=query_limit)
+                family_terms = (family_for_query or {}).get("domain_terms", [])
+                connector_query = query
+                if source != "linkedin" and family_terms:
+                    connector_query = f"{query} {' '.join(family_terms[:2])}"
+                offers = connector(connector_query, limit=query_limit)
                 consecutive_errors = 0
                 for offer in offers:
                     if not offer:
@@ -210,6 +214,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                                 for item in matched_families
                             ],
                             "query": query_label,
+                            "domain_terms": (family_for_query or {}).get("domain_terms", []) if source != "linkedin" else [],
                         }
                         offer["raw_metadata"] = metadata
                     published = _parse_published_at(offer.get("published_at"))
