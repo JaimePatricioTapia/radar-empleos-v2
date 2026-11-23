@@ -67,3 +67,12 @@ Los topes preventivos pueden ajustarse con variables de entorno o secretos de St
 - `RADAR_MAX_DAILY_EVALUATIONS=15`
 
 Se recomienda mantener los valores predeterminados hasta comprobar el consumo real de la cuenta gratuita. Reducirlos disminuye el consumo; aumentarlos puede agotar más rápidamente la cuota del proveedor.
+
+
+## Conectores de búsqueda
+
+- `python-jobspy` está fijado a la versión `1.5.0` para evitar cambios silenciosos del extractor entre despliegues.
+- LinkedIn se consulta una sola vez por ejecución, agrupando los cargos objetivo en una búsqueda booleana. No se solicita la descarga individual de cada descripción, porque esa opción multiplica las peticiones y puede provocar bloqueos HTTP 429.
+- Indeed se consulta de forma independiente por cargo. Un fallo de LinkedIn no detiene Indeed ni los demás portales.
+- Los errores reportados por JobSpy se incorporan al resumen de incidencias, en vez de presentarse como una búsqueda vacía sin explicación.
+- Google Jobs no se ofrece como fuente seleccionable mientras JobSpy 1.5.0 lo reporte no disponible.
