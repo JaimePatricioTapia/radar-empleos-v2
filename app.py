@@ -235,14 +235,24 @@ def render_search_task():
                 f"Fragmentos guardados: **{event.get('chunks_saved', 0)}** · "
                 f"Pendientes: **{event.get('pending_remaining', 'calculando')}**"
             )
+            if event.get("chunks_total"):
+                st.caption(
+                    f"Embeddings persistidos en este lote: {event.get('chunks_saved', 0)}/"
+                    f"{event.get('chunks_total', 0)} · Lote {event.get('embedding_batch', '—')}"
+                )
         else:
             fraction = 2 / 3 if event.get("status") != "completed" else 1.0
             st.progress(fraction, text=stage_label)
             st.write(
                 f"Evaluadas: **{event.get('evaluated', 0)}** · "
                 f"Preseleccionadas: **{event.get('ranked', 0)}** · "
-                f"Incidencias: **{event.get('errors', 0)}**"
+                f"Incidencias: **{event.get('errors', 0)}"
             )
+            if event.get("offers_total"):
+                st.caption(
+                    f"Ofertas revisadas en este lote: {event.get('offers_processed', 0)}/"
+                    f"{event.get('offers_total', 0)}"
+                )
 
         if stage == "discovery":
             metric_cols = st.columns(5)
