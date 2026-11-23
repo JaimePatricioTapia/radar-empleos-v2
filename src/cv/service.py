@@ -20,7 +20,38 @@ def _persist_prepared(prepared: dict, *, client, user_id: str) -> dict:
     if settings.embedding_dimensions != 3072:
         raise ValueError("GEMINI_EMBEDDING_DIMENSIONS debe ser 3072.")
 
+    # Caché por hash del CV y modelo: no recalcular embeddings si la versión
+    # activa ya tiene todos sus fragmentos persistidos.
+    cv_hash = prepared["cv"]["cv_hash"]
+    existing_versions = (
+        client.table("cv_versions")
+        .select("id,is_active,embedding_model,embedding_dimensions")
+        .eq("user_id", user_id)
+        .eq("cv_hash", cv_hash)
+        .eq("embedding_model", settings.embedding_model)
+        .eq("embedding_dimensions", 3072)
+        .limit(1).execute().data or []
+    )
     chunks = prepared["chunks"]
+    if existing_versions:
+        version = existing_versions[0]
+        existing_chunks = (
+            client.table("cv_chunks").select("id")
+            .eq("user_id", user_id).eq("cv_version_id", version["id"])
+            .limit(len(chunks) + 1).execute().data or []
+        )
+        if len(existing_chunks) >= len(chunks):
+            if not version.get("is_active"):
+                (client.table("cv_versions").update({"is_active": False})
+                 .eq("user_id", user_id).neq("id", version["id"]).execute())
+                (client.table("cv_versions").update({"is_active": True})
+                 .eq("user_id", user_id).eq("id", version["id"]).execute())
+            return {
+                "cv_version_id": version["id"], "cv_hash": cv_hash,
+                "chunk_count": len(chunks), "cached": True,
+                "embedding_model": settings.embedding_model,
+            }
+
     vectors = embed_texts(
         [chunk["text"] for chunk in chunks],
         api_key=settings.gemini_api_key,
