@@ -75,29 +75,66 @@ def _request_get(url: str, **kwargs):
     return requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
 
 
-def search_jobspy(query: str, limit: int = 15, location: str = "Chile") -> list[dict]:
-    """LinkedIn, Indeed y Google Jobs a través de python-jobspy."""
+def search_jobspy_site(query: str, *, site: str, limit: int = 15,
+                       location: str = "Chile") -> list[dict]:
+    """Consulta un único portal JobSpy y no hace una petición extra por descripción.
+
+    Mantener cada portal aislado evita repetir LinkedIn cuando el orquestador
+    procesa Indeed y permite que un error de una fuente no oculte las demás.
+    """
+    if site not in {"linkedin", "indeed"}:
+        raise ValueError(f"Portal JobSpy no soportado: {site}")
+
     from jobspy import scrape_jobs
     frame = scrape_jobs(
-        site_name=["linkedin", "indeed", "google"], search_term=query,
-        location=location, results_wanted=limit, country_indeed="Chile",
-        linkedin_fetch_description=True,
+        site_name=[site],
+        search_term=query,
+        location=location,
+        results_wanted=limit,
+        country_indeed="Chile",
+        fetch_description=False,
+        verbose=0,
     )
+    if frame is None:
+        return []
+
+    attrs = getattr(frame, "attrs", {}) or {}
+    errors = attrs.get("errors", {}) or {}
+    if errors.get(site):
+        raise RuntimeError(f"JobSpy {site}: {errors[site]}")
+
+    if frame.empty:
+        return []
+
     results = []
-    if frame is None or frame.empty:
-        return results
     for row in frame.to_dict(orient="records"):
-        source = str(row.get("site") or row.get("source") or "jobspy").lower()
+        source = str(row.get("site") or row.get("source") or site).lower()
         offer = normalize_offer(
-            source=source, title=row.get("title"), url=row.get("job_url") or row.get("link"),
-            company=row.get("company_name") or row.get("company"), location=row.get("location"),
-            description=row.get("description"), published_at=str(row.get("date_posted") or "") or None,
-            employment_type=row.get("job_type"), salary_text=row.get("min_amount") or row.get("salary"),
-            raw_metadata={"via": "python-jobspy"},
+            source=source,
+            title=row.get("title"),
+            url=row.get("job_url") or row.get("link"),
+            company=row.get("company_name") or row.get("company"),
+            location=row.get("location"),
+            description=row.get("description"),
+            published_at=str(row.get("date_posted") or "") or None,
+            employment_type=row.get("job_type"),
+            salary_text=row.get("min_amount") or row.get("salary"),
+            external_id=str(row.get("id") or ""),
+            raw_metadata={"via": "python-jobspy", "description_fetch_requested": False},
         )
         if offer:
             results.append(offer)
     return results
+
+
+def search_linkedin(query: str, limit: int = 15) -> list[dict]:
+    """Busca ofertas públicas de LinkedIn sin descargar cada página individual."""
+    return search_jobspy_site(query, site="linkedin", limit=limit)
+
+
+def search_indeed(query: str, limit: int = 15) -> list[dict]:
+    """Busca ofertas de Indeed de forma independiente de LinkedIn."""
+    return search_jobspy_site(query, site="indeed", limit=limit)
 
 
 def search_getonbrd(query: str, limit: int = 15) -> list[dict]:
@@ -305,8 +342,9 @@ def search_finning(query: str, limit: int = 12) -> list[dict]:
 
 
 SOURCE_REGISTRY = {
-    "linkedin": ("LinkedIn", "jobspy"), "indeed": ("Indeed", "jobspy"),
-    "google": ("Google Jobs", "jobspy"), "getonbrd": ("Get on Board", "getonbrd"),
+    # Google Jobs se excluye: JobSpy 1.5.0 lo reporta actualmente no disponible.
+    "linkedin": ("LinkedIn", "linkedin"), "indeed": ("Indeed", "indeed"),
+    "getonbrd": ("Get on Board", "getonbrd"),
     "chiletrabajos": ("Chiletrabajos", "chiletrabajos"),
     "computrabajo": ("Computrabajo", "computrabajo"),
     "contutalento": ("Con tu Talento", "contutalento"),
@@ -315,7 +353,8 @@ SOURCE_REGISTRY = {
     "finning": ("Finning Careers", "finning"),
 }
 CONNECTORS = {
-    "jobspy": search_jobspy, "getonbrd": search_getonbrd,
+    "linkedin": search_linkedin, "indeed": search_indeed,
+    "getonbrd": search_getonbrd,
     "chiletrabajos": search_chiletrabajos, "computrabajo": search_computrabajo,
     "contutalento": search_contutalento, "bne": search_bne,
     "codelco": search_codelco, "finning": search_finning,
