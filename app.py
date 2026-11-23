@@ -11,6 +11,7 @@ from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
 from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
+from src.search.role_families import derive_role_families
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
 st.title("Radar de Empleos 2.0")
@@ -81,6 +82,21 @@ with st.sidebar:
             st.session_state.pop("supabase_client", None)
             st.rerun()
 
+# Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
+active_cv_version = (
+    client.table("cv_versions").select("id")
+    .eq("user_id", user["id"]).eq("is_active", True).limit(1).execute().data or []
+)
+derived_profile = {"families": [], "roles": [], "evidence_count": 0}
+if active_cv_version:
+    cv_evidence = (
+        client.table("cv_chunks").select("content")
+        .eq("user_id", user["id"])
+        .eq("cv_version_id", active_cv_version[0]["id"])
+        .limit(500).execute().data or []
+    )
+    derived_profile = derive_role_families(cv_evidence)
+
 st.subheader("Mi currículum")
 st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")
 uploaded_cv = st.file_uploader("Seleccionar CV (PDF, máximo 15 MB)", type=["pdf"], key="cv_pdf_upload")
@@ -130,11 +146,25 @@ selected_sources = st.multiselect(
     default=DEFAULT_SOURCES,
     format_func=lambda value: source_labels[value],
 )
+generated_roles = derived_profile.get("roles", [])
+role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES))
+default_roles = generated_roles or DEFAULT_TARGET_ROLES
 selected_roles = st.multiselect(
-    "Cargos objetivo",
-    options=DEFAULT_TARGET_ROLES,
-    default=DEFAULT_TARGET_ROLES,
+    "Cargos y funciones para buscar (derivados del CV + objetivos adicionales)",
+    options=role_options,
+    default=default_roles,
+    help="Las familias derivadas amplían la búsqueda; los cargos objetivo anteriores siguen disponibles como señales adicionales.",
 )
+role_context = [
+    {
+        "family_id": family["id"],
+        "family_name": family["name"],
+        "priority": family["priority"],
+        "titles": family["titles"],
+        "evidence": family["evidence"],
+    }
+    for family in derived_profile.get("families", [])
+]
 limit_per_query = st.slider(
     "Máximo de resultados por consulta y portal",
     min_value=5,
@@ -150,6 +180,17 @@ st.caption(
     f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda. "
     "LinkedIn agrupa los cargos en una sola consulta para reducir bloqueos por ráfagas."
 )
+if derived_profile.get("families"):
+    with st.expander("Familias funcionales detectadas en su CV", expanded=True):
+        st.caption("Análisis local de evidencia ya guardada; no consume Gemini ni vuelve a generar embeddings.")
+        for family in derived_profile["families"]:
+            st.markdown(
+                f"**P{family['priority']} · {family['name']}** — "
+                f"{', '.join(family['titles'])}"
+            )
+            st.caption("Señales encontradas: " + ", ".join(family["evidence"]))
+else:
+    st.warning("No se pudieron derivar familias del CV activo. Se mantienen disponibles los cargos objetivo anteriores; revise que el CV esté procesado.")
 
 try:
     active_cv = (
@@ -184,6 +225,7 @@ if run_pipeline:
         roles=selected_roles,
         sources=selected_sources,
         limit_per_query=limit_per_query,
+        role_context=role_context,
     )
 
 @st.fragment(run_every="1s")
