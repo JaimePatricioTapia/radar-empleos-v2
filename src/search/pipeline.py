@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Callable, Any
 
+from src.config import get_settings
 from src.search.ingestion import run_discovery
 from src.search.processing import (
     build_job_chunks,
@@ -24,10 +25,9 @@ def run_full_search_pipeline(
 ) -> dict:
     """Ejecuta las etapas completas; conserva en DB cada resultado confirmado.
 
-    Los lotes se repiten hasta no tener ofertas pendientes. La evaluación se
-    pagina de forma lógica: cada lote evaluado deja de aparecer en el RPC de
-    pendientes para el CV activo. Si una etapa no progresa o reporta errores,
-    se detiene para evitar ciclos infinitos y permitir reintentar con seguridad.
+    Los lotes se repiten hasta completar el trabajo o alcanzar el presupuesto
+    gratuito móvil de 24 horas. Cada sublote confirmado queda guardado y puede
+    reanudarse sin recalcular fragmentos ya persistidos.
     """
     active_cv = (
         client.table("cv_versions")
@@ -63,13 +63,25 @@ def run_full_search_pipeline(
         "excluded": 0,
         "batches": 0,
         "pending_remaining": 0,
+        "budget_exhausted": False,
+        "budget_remaining": 0,
+        "chunks_embedded_last_24h": 0,
     }
     report("Etapa 2/3 · Preparando descripciones y embeddings…")
     previous_pending = None
+    default_chunk_budget = max(1, int(get_settings().max_daily_job_chunks))
     while True:
         status = get_processing_status(client, user_id=user_id)
         pending = int(status["pending_chunking"])
+        preparation["budget_remaining"] = int(
+            status.get("daily_chunk_budget_remaining", default_chunk_budget)
+        )
+        preparation["chunks_embedded_last_24h"] = int(status.get("chunks_embedded_last_24h", 0))
         if pending == 0:
+            break
+        if preparation["budget_remaining"] <= 0:
+            preparation["budget_exhausted"] = True
+            preparation["pending_remaining"] = pending
             break
         if previous_pending is not None and pending >= previous_pending:
             preparation["pending_remaining"] = pending
@@ -88,17 +100,23 @@ def run_full_search_pipeline(
         preparation["insufficient"] += int(batch.get("insufficient", 0))
         preparation["excluded"] += int(batch.get("excluded", 0))
         preparation["batches"] += 1
+        preparation["budget_remaining"] = int(batch.get("budget_remaining", 0))
+        preparation["chunks_embedded_last_24h"] = int(batch.get("chunks_embedded_last_24h", 0))
         report(
-            f"Preparación: {preparation['offers_chunked']} ofertas procesadas; "
-            f"{batch.get('eligible_pending', 0)} pendientes en este ciclo."
+            f"Preparación: {preparation['offers_chunked']} ofertas completadas; "
+            f"{preparation['chunks_saved']} fragmentos guardados; "
+            f"presupuesto gratuito restante: {preparation['budget_remaining']} fragmentos."
         )
+        if batch.get("budget_exhausted"):
+            preparation["budget_exhausted"] = True
+            break
         next_status = get_processing_status(client, user_id=user_id)
         next_pending = int(next_status["pending_chunking"])
         if next_pending >= pending:
             preparation["pending_remaining"] = next_pending
             raise RuntimeError(
-                "La preparación se detuvo sin avanzar (posible descripción inválida "
-                "o error de embeddings). Los datos ya guardados se mantienen."
+                "La preparación se detuvo sin avanzar. Los fragmentos guardados "
+                "se conservan y el siguiente intento continuará solo con los faltantes."
             )
     final_status = get_processing_status(client, user_id=user_id)
     preparation["pending_remaining"] = int(final_status["pending_chunking"])
@@ -113,9 +131,12 @@ def run_full_search_pipeline(
         "errors": [],
         "results": [],
         "batches": 0,
+        "budget_exhausted": False,
+        "budget_remaining": 15,
     }
     report("Etapa 3/3 · Comparando requisitos de las ofertas con evidencia del CV…")
-    evaluation_limit = max(1, min(int(evaluation_batch_size), 1000))
+    configured_daily_limit = max(1, int(get_settings().max_daily_evaluations))
+    evaluation_limit = max(1, min(int(evaluation_batch_size), configured_daily_limit))
     while True:
         batch = evaluate_top_offers(
             client,
@@ -130,11 +151,13 @@ def run_full_search_pipeline(
         evaluation["errors"].extend(batch.get("errors", []))
         evaluation["results"].extend(batch.get("results", []))
         evaluation["batches"] += 1
+        evaluation["budget_remaining"] = int(batch.get("budget_remaining", 0))
+        evaluation["budget_exhausted"] = bool(batch.get("budget_exhausted", False))
         report(
             f"Evaluación: {evaluation['evaluated']} ofertas evaluadas; "
             f"{len(evaluation['errors'])} incidencias."
         )
-        if batch.get("errors") or int(batch.get("ranked", 0)) < evaluation_limit:
+        if batch.get("errors") or batch.get("budget_exhausted") or int(batch.get("ranked", 0)) < evaluation_limit:
             break
         if int(batch.get("evaluated", 0)) == 0:
             break
@@ -148,9 +171,14 @@ def run_full_search_pipeline(
         "preparation": preparation,
         "evaluation": evaluation,
         "processing_status": final_status,
+        "paused_for_free_quota": bool(
+            preparation["budget_exhausted"] or evaluation["budget_exhausted"]
+        ),
         "completed": (
             not evaluation["errors"]
             and preparation["pending_remaining"] == 0
             and int(discovery.get("errors", 0)) == 0
+            and not preparation["budget_exhausted"]
+            and not evaluation["budget_exhausted"]
         ),
     }

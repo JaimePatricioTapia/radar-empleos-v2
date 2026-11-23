@@ -2,11 +2,16 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
+import logging
+import time
 import hashlib
 import json
 from google import genai
 from src.config import get_settings
 from src.evaluation.schemas import OfferEvaluation
+from src.cv.embeddings import _is_retryable_error, _retry_delay_seconds
+
+logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "evaluator_system.md"
 
@@ -44,15 +49,31 @@ def evaluate_offer(
             for item in evidence_chunks
         ],
     }
-    response = client.models.generate_content(
-        model=model_name,
-        contents=(load_system_prompt() + "\n\nINPUT JSON:\n" + json.dumps(payload, ensure_ascii=False)),
-        config={
+    request = {
+        "model": model_name,
+        "contents": (load_system_prompt() + "\n\nINPUT JSON:\n" + json.dumps(payload, ensure_ascii=False)),
+        "config": {
             "response_mime_type": "application/json",
             "response_schema": OfferEvaluation,
             "temperature": 0,
         },
-    )
+    }
+    response = None
+    for attempt in range(5):
+        try:
+            response = client.models.generate_content(**request)
+            break
+        except Exception as exc:
+            if attempt >= 4 or not _is_retryable_error(exc):
+                raise
+            delay = _retry_delay_seconds(exc, attempt)
+            logger.warning(
+                "Gemini evaluación transitoria (%s); reintento %s/4 en %.1f s. Modelo=%s",
+                type(exc).__name__, attempt + 1, delay, model_name,
+            )
+            time.sleep(delay)
+    if response is None:
+        raise RuntimeError("Gemini no devolvió respuesta de evaluación.")
     result = OfferEvaluation.model_validate_json(response.text).model_dump()
     return {
         "evaluation": result,
