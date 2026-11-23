@@ -46,6 +46,7 @@ def test_embeddings_retry_429_and_persist_each_batch(monkeypatch):
         ["primer texto", "segundo texto"],
         api_key="fake",
         batch_size=1,
+        inter_batch_delay_seconds=0,
         on_batch=lambda start, texts, batch_vectors: persisted.append(
             (start, list(texts), len(batch_vectors))
         ),
@@ -103,3 +104,34 @@ def test_embedding_rate_limit_exhaustion_raises_resumable_error(monkeypatch):
     assert len(calls) == 2
     assert waits == [0.5]
     assert error.value.retry_after_seconds == pytest.approx(0.5)
+
+
+def test_embeddings_use_batches_of_90_and_wait_60_seconds_between_requests(monkeypatch):
+    calls = []
+    waits = []
+
+    class FakeModels:
+        def embed_content(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                embeddings=[
+                    SimpleNamespace(values=[0.0] * 3072)
+                    for _ in kwargs["contents"]
+                ]
+            )
+
+    class FakeClient:
+        def __init__(self, api_key):
+            self.models = FakeModels()
+
+    monkeypatch.setattr(embeddings.genai, "Client", FakeClient)
+    monkeypatch.setattr(embeddings.time, "sleep", waits.append)
+
+    vectors = embed_texts(
+        [f"texto {index}" for index in range(181)],
+        api_key="fake",
+    )
+
+    assert [len(call["contents"]) for call in calls] == [90, 90, 1]
+    assert len(vectors) == 181
+    assert waits == [60, 60]
