@@ -169,10 +169,12 @@ except Exception as exc:
 if not active_cv:
     st.warning("Antes de iniciar, procese su currículum en la sección «Mi currículum».")
 
+active_search_task = st.session_state.get("radar_search_task")
+search_already_running = active_search_task is not None and not active_search_task.finished
 run_pipeline = st.button(
     "🚀 Buscar y evaluar ofertas automáticamente",
     type="primary",
-    disabled=not selected_sources or not selected_roles or not active_cv,
+    disabled=not selected_sources or not selected_roles or not active_cv or search_already_running,
     use_container_width=True,
 )
 if run_pipeline:
