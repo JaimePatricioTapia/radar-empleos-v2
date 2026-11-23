@@ -164,6 +164,7 @@ role_context = [
         "family_name": family["name"],
         "priority": family["priority"],
         "titles": family["titles"],
+        "domain_terms": family["domain_terms"],
         "evidence": family["evidence"],
     }
     for family in derived_profile.get("families", [])
@@ -192,7 +193,8 @@ if derived_profile.get("families"):
                 f"**P{family['priority']} · {family['name']}** — "
                 f"{', '.join(family['titles'])}"
             )
-            st.caption("Señales encontradas: " + ", ".join(family["evidence"]))
+            st.caption("Competencias/dominio para ampliar consultas: " + ", ".join(family["domain_terms"]))
+            st.caption("Señales encontradas en el CV: " + ", ".join(family["evidence"]))
 else:
     st.warning("No se pudieron derivar familias del CV activo. Se mantienen disponibles los cargos objetivo anteriores; revise que el CV esté procesado.")
 
