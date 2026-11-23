@@ -72,7 +72,6 @@ def run_full_search_pipeline(
         should_stop=should_stop,
     )
 
-    emit_stage("preparation", status="running", message="Preparando descripciones y embeddings")
     emit_stage(
         "discovery", status="partial" if discovery.get("stopped_early") else "completed",
         queries_completed=discovery.get("queries_completed", 0),
@@ -82,6 +81,7 @@ def run_full_search_pipeline(
         offers_saved=discovery.get("saved", 0),
         stopped_early=bool(discovery.get("stopped_early")),
     )
+    emit_stage("preparation", status="running", message="Preparando descripciones y embeddings")
     preparation = {
         "offers_chunked": 0,
         "chunks_saved": 0,
