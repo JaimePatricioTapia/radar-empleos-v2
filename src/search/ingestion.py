@@ -206,7 +206,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         source_stats["duplicates"] += 1
                         continue
                     seen.add(key)
-                    existing = (client.table("job_offers").select("id")
+                    existing = (client.table("job_offers").select("id,published_at,raw_metadata")
                                 .eq("user_id", user_id).eq("job_hash", key)
                                 .limit(1).execute())
                     if not existing.data and offer.get("source_url"):
@@ -215,6 +215,16 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                                     .eq("source_url", offer["source_url"])
                                     .limit(1).execute())
                     if existing.data:
+                        previous_offer = existing.data[0]
+                        if published and not previous_offer.get("published_at"):
+                            previous_metadata = previous_offer.get("raw_metadata") or {}
+                            client.table("job_offers").update({
+                                "published_at": published,
+                                "raw_metadata": {
+                                    **previous_metadata,
+                                    "publication_date_status": "verified_recent",
+                                },
+                            }).eq("id", previous_offer["id"]).eq("user_id", user_id).execute()
                         stats["duplicates"] += 1
                         source_stats["duplicates"] += 1
                         continue
