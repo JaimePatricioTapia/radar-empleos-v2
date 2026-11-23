@@ -69,10 +69,13 @@ def run_full_search_pipeline(
     }
     report("Etapa 2/3 · Preparando descripciones y embeddings…")
     previous_pending = None
+    default_chunk_budget = max(1, int(get_settings().max_daily_job_chunks))
     while True:
         status = get_processing_status(client, user_id=user_id)
         pending = int(status["pending_chunking"])
-        preparation["budget_remaining"] = int(status.get("daily_chunk_budget_remaining", 0))
+        preparation["budget_remaining"] = int(
+            status.get("daily_chunk_budget_remaining", default_chunk_budget)
+        )
         preparation["chunks_embedded_last_24h"] = int(status.get("chunks_embedded_last_24h", 0))
         if pending == 0:
             break
