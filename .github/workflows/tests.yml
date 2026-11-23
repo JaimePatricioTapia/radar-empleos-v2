@@ -9,6 +9,8 @@ on:
       - feature/affinity-threshold-mining-filter
       - feature/one-click-search-85-affinity
       - feature/streamlit-cloud-deployment
+      - feature/radar-14d-progress-resume
+      - feature/radar-14d-progress-resume
       - feature/free-tier-token-optimization-v2
   pull_request:
     branches:
