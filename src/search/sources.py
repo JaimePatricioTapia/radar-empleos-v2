@@ -71,6 +71,27 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
     }
 
 
+def _extract_published_at(container) -> str | None:
+    """Obtiene fechas explícitas de tarjetas HTML sin inferirlas desde el orden."""
+    if container is None:
+        return None
+    selectors = (
+        "time[datetime]", "time", "[data-date]", "[data-published]",
+        ".date", ".fecha", ".posted", ".publication-date",
+    )
+    for selector in selectors:
+        element = container.select_one(selector)
+        if element is None:
+            continue
+        value = (
+            element.get("datetime") or element.get("data-date")
+            or element.get("data-published") or element.get_text(" ", strip=True)
+        )
+        if value:
+            return str(value).strip()
+    return None
+
+
 def _request_get(url: str, **kwargs):
     return requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
 
@@ -190,7 +211,7 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
             source="chiletrabajos", title=link.get_text(" ", strip=True), url=url,
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
-            description=description,
+            description=description, published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -221,6 +242,7 @@ def search_computrabajo(query: str, limit: int = 12) -> list[dict]:
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
             description=summary.get_text(" ", strip=True) if summary else "",
+            published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -250,6 +272,7 @@ def search_contutalento(query: str, limit: int = 12) -> list[dict]:
         offer = normalize_offer(
             source="contutalento", title=title, url=url, company=company,
             location="Chile", description="",
+            published_at=_extract_published_at(heading.find_parent(["article", "li", "div"])),
             raw_metadata={"description_status": "pendiente de enriquecimiento"},
         )
         if offer:
@@ -309,6 +332,7 @@ def search_codelco(query: str, limit: int = 12) -> list[dict]:
             source="codelco", title=title, url=urljoin(base, link.get("href", "")),
             company="Codelco", location=row.get_text(" ", strip=True) if row else "Chile",
             description="",
+            published_at=_extract_published_at(row or link.parent),
         )
         if offer:
             results.append(offer)
