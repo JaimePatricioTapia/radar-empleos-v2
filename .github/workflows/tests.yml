@@ -16,6 +16,7 @@ on:
       - feature/radar-14d-progress-resume
       - feature/free-tier-token-optimization-v2
       - feature/cv-derived-role-families
+      - fix/background-supabase-auth-evaluation
   pull_request:
     branches:
       - main
