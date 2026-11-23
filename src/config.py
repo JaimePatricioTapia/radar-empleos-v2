@@ -25,6 +25,9 @@ class Settings:
     gemini_model: str = _setting("GEMINI_MODEL", "gemini-2.5-flash")
     embedding_model: str = _setting("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
     embedding_dimensions: int = int(_setting("GEMINI_EMBEDDING_DIMENSIONS", "3072"))
+    # Topes internos de protección para la cuota gratuita; no son cuotas oficiales de Google.
+    max_daily_job_chunks: int = int(_setting("RADAR_MAX_DAILY_JOB_CHUNKS", "250"))
+    max_daily_evaluations: int = int(_setting("RADAR_MAX_DAILY_EVALUATIONS", "15"))
     cv_pdf_path: str | None = _setting("CV_PDF_PATH")
     supabase_url: str | None = _setting("SUPABASE_URL")
     # Debe ser una publishable/anon key. Nunca configurar service_role en la app.
