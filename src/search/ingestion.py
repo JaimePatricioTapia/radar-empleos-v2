@@ -56,7 +56,7 @@ def _parse_published_at(value, *, now: datetime | None = None):
                 dt = now - timedelta(days=1)
             else:
                 relative = re.search(
-                    r"(?:hace\s*)?(\d+)\s*(d[ií]as?|hours?|horas?|d[ií]as?\s*atr[aá]s|weeks?|semanas?)\s*(?:ago)?",
+                    r"(?:hace\s*)?(\d+)\s*(d[ií]as?|days?|hours?|horas?|weeks?|semanas?)\s*(?:atr[aá]s|ago)?",
                     lowered,
                 )
                 if relative:
