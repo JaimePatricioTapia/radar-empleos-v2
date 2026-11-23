@@ -111,6 +111,7 @@ def test_run_discovery_does_not_repeat_linkedin_for_each_selected_jobspy_source(
     )
 
     assert linkedin.call_count == 1
+    assert linkedin.call_args.kwargs["limit"] == 25
     assert indeed.call_count == 3
     assert result["queries"] == 4
     assert result["errors"] == 0
