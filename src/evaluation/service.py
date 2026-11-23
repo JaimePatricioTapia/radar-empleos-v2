@@ -9,7 +9,6 @@ from src.evaluation.evaluator import evaluate_offer
 from src.search.retriever import retrieve_cv_evidence
 from src.search.processing import (
     TARGET_STRATEGY,
-    MAX_DAILY_EVALUATIONS,
     _rolling_budget_start,
 )
 
