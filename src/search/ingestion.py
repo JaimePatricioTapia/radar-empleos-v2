@@ -56,7 +56,7 @@ def _parse_published_at(value, *, now: datetime | None = None):
                 dt = now - timedelta(days=1)
             else:
                 relative = re.search(
-                    r"(?:hace\\s*)?(\\d+)\\s*(d[ií]as?|hours?|horas?|d[ií]as?\\s*atr[aá]s|weeks?|semanas?)\\s*(?:ago)?",
+                    r"(?:hace\s*)?(\d+)\s*(d[ií]as?|hours?|horas?|d[ií]as?\s*atr[aá]s|weeks?|semanas?)\s*(?:ago)?",
                     lowered,
                 )
                 if relative:
@@ -216,6 +216,8 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         "errors": stats["errors"],
                         "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
                     })
+            if should_stop and should_stop():
+                stats["stopped_early"] = True
             if stats["stopped_early"]:
                 break
         stats["by_source"][source] = source_stats
