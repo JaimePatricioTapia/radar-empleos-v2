@@ -11,8 +11,19 @@ from google import genai
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIMENSIONS = 3072
-DEFAULT_EMBEDDING_BATCH_SIZE = 40
+DEFAULT_EMBEDDING_BATCH_SIZE = 90
+DEFAULT_INTER_BATCH_DELAY_SECONDS = 60
 DEFAULT_MAX_RETRIES = 4
+
+
+class EmbeddingRateLimitError(RuntimeError):
+    """La cuota RPM de embeddings sigue limitada tras los reintentos."""
+
+    def __init__(self, message: str, retry_after_seconds: float):
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+
+
 EmbeddingTask = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
 
 
@@ -25,6 +36,12 @@ def _is_retryable_error(exc: Exception) -> bool:
         for marker in ("429", "RESOURCE_EXHAUSTED", "UNAVAILABLE",
                        "INTERNAL", "DEADLINE_EXCEEDED", "SERVICE UNAVAILABLE")
     )
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    message = str(exc).upper()
+    return status == 429 or "429" in message or "RESOURCE_EXHAUSTED" in message
 
 
 def _retry_delay_seconds(exc: Exception, attempt: int) -> float:
@@ -50,6 +67,7 @@ def embed_texts(
     task_type: EmbeddingTask = "RETRIEVAL_DOCUMENT",
     output_dimensionality: int = EMBEDDING_DIMENSIONS,
     batch_size: int = DEFAULT_EMBEDDING_BATCH_SIZE,
+    inter_batch_delay_seconds: float = DEFAULT_INTER_BATCH_DELAY_SECONDS,
     max_retries: int = DEFAULT_MAX_RETRIES,
     on_batch: Callable[[int, list[str], list[list[float]]], None] | None = None,
 ) -> list[list[float]]:
@@ -65,6 +83,8 @@ def embed_texts(
         raise ValueError("Radar 2.0 fija los embeddings en 3.072 dimensiones.")
     if not 1 <= batch_size <= 250:
         raise ValueError("batch_size debe estar entre 1 y 250.")
+    if inter_batch_delay_seconds < 0:
+        raise ValueError("inter_batch_delay_seconds no puede ser negativo.")
     if max_retries < 0 or max_retries > 8:
         raise ValueError("max_retries debe estar entre 0 y 8.")
     if any(not isinstance(text, str) or not text.strip() for text in texts):
@@ -87,7 +107,13 @@ def embed_texts(
                 )
                 break
             except Exception as exc:
-                if attempt >= max_retries or not _is_retryable_error(exc):
+                if not _is_retryable_error(exc):
+                    raise
+                if attempt >= max_retries:
+                    if _is_rate_limit_error(exc):
+                        raise EmbeddingRateLimitError(
+                            str(exc), _retry_delay_seconds(exc, attempt)
+                        ) from exc
                     raise
                 delay = _retry_delay_seconds(exc, attempt)
                 logger.warning(
@@ -110,4 +136,12 @@ def embed_texts(
         if on_batch:
             on_batch(start, batch, batch_vectors)
         vectors.extend(batch_vectors)
+        # Un minuto completo entre solicitudes exitosas: margen conservador
+        # frente al límite gratuito de 100 solicitudes por minuto.
+        if start + len(batch) < len(texts) and inter_batch_delay_seconds:
+            logger.info(
+                "Lote de embeddings %s/%s completado; esperando %.0f s antes del siguiente.",
+                start + len(batch), len(texts), inter_batch_delay_seconds,
+            )
+            time.sleep(inter_batch_delay_seconds)
     return vectors

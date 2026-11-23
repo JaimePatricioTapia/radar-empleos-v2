@@ -185,12 +185,14 @@ if run_pipeline:
         evaluation = result["evaluation"]
         status.update(
             label=(
-                "Proceso pausado por protección de cuota gratuita"
+                "Proceso pausado por límite temporal de Gemini"
+                if result.get("paused_for_api_quota")
+                else "Proceso pausado por protección de cuota gratuita"
                 if result.get("paused_for_free_quota")
                 else "Proceso integral finalizado" if result["completed"]
                 else "Proceso finalizado con incidencias"
             ),
-            state="complete" if result["completed"] or result.get("paused_for_free_quota") else "error",
+            state="complete" if result["completed"] or result.get("paused_for_free_quota") or result.get("paused_for_api_quota") else "error",
             expanded=not result["completed"],
         )
         st.subheader("Resumen de esta ejecución")
@@ -211,6 +213,13 @@ if run_pipeline:
             f"Lotes de evaluación: {evaluation['batches']} · "
             f"Ofertas pendientes de preparación: {preparation['pending_remaining']}"
         )
+        if result.get("paused_for_api_quota"):
+            st.warning(
+                "Google mantuvo el límite de solicitudes por minuto para generar embeddings. "
+                "La preparación se pausó de forma segura; los fragmentos guardados no se pierden "
+                "y el siguiente intento continuará con los pendientes."
+            )
+            st.caption(preparation.get("api_quota_message") or "Espere el tiempo indicado por Google antes de reintentar.")
         if result.get("paused_for_free_quota"):
             st.warning(
                 "Se alcanzó al menos uno de los límites preventivos gratuitos configurados. "
@@ -242,6 +251,8 @@ if run_pipeline:
             st.success(
                 f"La bandeja priorizada se actualizó con las ofertas que alcanzan el {MINIMUM_AFFINITY_SCORE}%."
             )
+        elif result.get("paused_for_api_quota"):
+            st.info("La búsqueda quedó pausada por el límite temporal de Gemini. No necesita volver a cargar el CV; espere y ejecute nuevamente el mismo botón para continuar.")
         elif result.get("paused_for_free_quota"):
             st.info("La búsqueda quedó pausada de forma segura para proteger la cuota gratuita. Los resultados parciales están disponibles en la bandeja.")
         else:

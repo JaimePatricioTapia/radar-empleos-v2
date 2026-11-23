@@ -1,6 +1,9 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from src.cv.embeddings import EmbeddingRateLimitError
 
 from src.search import pipeline
 
@@ -108,3 +111,40 @@ def test_affinity_recommendation_threshold_is_85():
     assert meets_affinity_threshold(85) is True
     assert meets_affinity_threshold(84) is False
     assert meets_affinity_threshold(None) is False
+
+
+
+def test_full_pipeline_pauses_cleanly_when_embedding_quota_stays_exhausted():
+    client = _Client()
+    with (
+        patch.object(pipeline, "get_settings", return_value=SimpleNamespace(
+            max_daily_job_chunks=250, max_daily_evaluations=15
+        )),
+        patch.object(pipeline, "run_discovery", return_value={
+            "total_found": 1, "saved": 1, "errors": 0,
+            "by_source": {}, "error_details": [],
+        }),
+        patch.object(pipeline, "get_processing_status", side_effect=[
+            {"pending_chunking": 1, "daily_chunk_budget_remaining": 250},
+            {"pending_chunking": 1, "daily_chunk_budget_remaining": 249},
+        ]),
+        patch.object(
+            pipeline, "build_job_chunks",
+            side_effect=EmbeddingRateLimitError("429 RESOURCE_EXHAUSTED", 51),
+        ),
+        patch.object(pipeline, "evaluate_top_offers", return_value={
+            "ranked": 0, "evaluated": 0, "below_threshold": 0,
+            "skipped_existing": 0, "skipped_excluded": 0,
+            "errors": [], "results": [], "budget_exhausted": False,
+            "budget_remaining": 15,
+        }),
+    ):
+        result = pipeline.run_full_search_pipeline(
+            client, user_id="user-1",
+            roles=["Business Analyst"], sources=["linkedin"],
+        )
+
+    assert result["paused_for_api_quota"] is True
+    assert result["completed"] is False
+    assert result["preparation"]["pending_remaining"] == 1
+    assert "429" in result["preparation"]["api_quota_message"]
