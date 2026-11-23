@@ -167,6 +167,7 @@ role_context = [
         "evidence": family["evidence"],
     }
     for family in derived_profile.get("families", [])
+    if any(title in selected_roles for title in family["titles"])
 ]
 limit_per_query = st.slider(
     "Máximo de resultados por consulta y portal",
