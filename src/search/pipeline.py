@@ -1,6 +1,7 @@
 """Orquestador de una sola acción para búsqueda, preparación y evaluación."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Callable, Any
 
 from src.config import get_settings
@@ -54,7 +55,7 @@ def run_full_search_pipeline(
         if on_progress:
             on_progress({
                 "stage": stage,
-                "last_updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                "last_updated_at": datetime.now(timezone.utc).isoformat(),
                 **details,
             })
 
