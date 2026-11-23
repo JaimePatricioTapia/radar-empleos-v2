@@ -218,9 +218,9 @@ def render_search_task():
             st.info("Detención solicitada. Radar terminará la consulta actual y continuará con preparación y evaluación.")
         if stage == "discovery":
             total = max(1, int(event.get("queries_total", estimated_queries)))
-            completed = min(total, int(event.get("queries_completed", 0)))
+            completed = min(total, int(event.get("queries_completed", 0)) + int(event.get("queries_skipped", 0)))
             fraction = completed / total
-            st.progress(fraction / 3, text=f"{stage_label} · {completed}/{total} consultas completadas")
+            st.progress(fraction / 3, text=f"{stage_label} · {completed}/{total} consultas resueltas")
             st.write(
                 f"**Portal:** {event.get('source_label', 'Preparando')} · "
                 f"**Cargo/consulta:** {event.get('query', '—')}"
@@ -244,12 +244,13 @@ def render_search_task():
 
         if stage == "discovery":
             metric_cols = st.columns(5)
-            metric_cols[0].metric("Consultas", f"{event.get('queries_completed', 0)}/{event.get('queries_total', estimated_queries)}")
+            metric_cols[0].metric("Consultas", f"{event.get('queries_completed', 0) + event.get('queries_skipped', 0)}/{event.get('queries_total', estimated_queries)}")
             metric_cols[1].metric("Encontradas", event.get("offers_found", 0))
             metric_cols[2].metric("Nuevas guardadas", event.get("offers_saved", 0))
             metric_cols[3].metric("Duplicadas", event.get("duplicates", 0))
             metric_cols[4].metric("Errores", event.get("errors", 0))
             st.caption(
+                f"Consultas omitidas por fallos repetidos: {event.get('queries_skipped', 0)} · "
                 f"Fuera de 14 días: {event.get('stale_skipped', 0)} · "
                 f"Fecha no informada: {event.get('publication_date_unknown', 0)} · "
                 f"Tiempo transcurrido: {event.get('elapsed_seconds', 0)} s"
@@ -304,6 +305,7 @@ def render_search_task():
             cols[4].metric("Afinidad ≥85%", len(evaluation.get("results", [])))
             st.caption(
                 f"Duplicadas: {discovery.get('duplicates', 0)} · "
+                f"Consultas omitidas por fallos repetidos: {discovery.get('queries_skipped', 0)} · "
                 f"Fuera de 14 días: {discovery.get('stale_skipped', 0)} · "
                 f"Fecha no informada: {discovery.get('publication_date_unknown', 0)} · "
                 f"Errores de búsqueda: {discovery.get('errors', 0)}"
