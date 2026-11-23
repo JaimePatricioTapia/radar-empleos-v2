@@ -72,6 +72,7 @@ def run_full_search_pipeline(
         "discovery", status="partial" if discovery.get("stopped_early") else "completed",
         queries_completed=discovery.get("queries_completed", 0),
         queries_total=discovery.get("queries", 0),
+        queries_skipped=discovery.get("queries_skipped", 0),
         offers_found=discovery.get("total_found", 0),
         offers_saved=discovery.get("saved", 0),
         stopped_early=bool(discovery.get("stopped_early")),
