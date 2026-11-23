@@ -83,19 +83,22 @@ with st.sidebar:
             st.rerun()
 
 # Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
-active_cv_version = (
-    client.table("cv_versions").select("id")
-    .eq("user_id", user["id"]).eq("is_active", True).limit(1).execute().data or []
-)
 derived_profile = {"families": [], "roles": [], "evidence_count": 0}
-if active_cv_version:
-    cv_evidence = (
-        client.table("cv_chunks").select("content")
-        .eq("user_id", user["id"])
-        .eq("cv_version_id", active_cv_version[0]["id"])
-        .limit(500).execute().data or []
+try:
+    active_cv_version = (
+        client.table("cv_versions").select("id")
+        .eq("user_id", user["id"]).eq("is_active", True).limit(1).execute().data or []
     )
-    derived_profile = derive_role_families(cv_evidence)
+    if active_cv_version:
+        cv_evidence = (
+            client.table("cv_chunks").select("content")
+            .eq("user_id", user["id"])
+            .eq("cv_version_id", active_cv_version[0]["id"])
+            .limit(500).execute().data or []
+        )
+        derived_profile = derive_role_families(cv_evidence)
+except Exception as exc:
+    st.warning(f"No se pudo derivar el perfil de cargos desde el CV: {type(exc).__name__}. Se conservarán los cargos objetivo manuales.")
 
 st.subheader("Mi currículum")
 st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")
@@ -433,6 +436,13 @@ try:
                 f"{item.get('company') or 'Empresa no informada'} · "
                 f"{item.get('sector_category') or 'POR_CLASIFICAR'}"
             )
+            search_origin = (item.get("raw_metadata") or {}).get("search_origin") or {}
+            origin_families = search_origin.get("families") or []
+            if origin_families:
+                st.caption("Familia de búsqueda: " + ", ".join(
+                    family.get("name", family.get("id", ""))
+                    for family in origin_families if family
+                ))
             publication_status = (item.get("raw_metadata") or {}).get("publication_date_status")
             if publication_status == "unknown":
                 st.caption("Fecha de publicación no informada por el portal; antigüedad no verificable.")
