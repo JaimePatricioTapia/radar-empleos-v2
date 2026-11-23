@@ -260,6 +260,7 @@ Una versión solo se considera lista para integrar cuando:
 - El orquestador normaliza fechas ISO, fechas de calendario y expresiones relativas en español/inglés; descarta publicaciones verificablemente más antiguas de 14 días.
 - Las fuentes que no informan una fecha fiable no se etiquetan falsamente como recientes: se conservan con `publication_date_status=unknown` y se contabilizan por separado para no perder oportunidades potencialmente vigentes.
 - Las ofertas nuevas se emiten al feed después de confirmarse su persistencia.
+- Un portal que acumula dos errores consecutivos omite las consultas restantes de esa fuente y permite que los otros portales continúen; el panel informa las consultas omitidas.
 - La búsqueda y el procesamiento se ejecutan en un hilo de trabajo; el hilo de interfaz recibe eventos y puede solicitar detener el descubrimiento tras la consulta actual. La preparación y evaluación continúan con el conjunto persistido.
 - El evaluador recibe una instrucción explícita para tratar publicaciones y fragmentos del CV como datos no confiables y no obedecer instrucciones incrustadas.
 - Estos cambios están en una rama de trabajo y no se consideran desplegados hasta aprobar CI, integrar la rama y verificar Streamlit Community Cloud.
