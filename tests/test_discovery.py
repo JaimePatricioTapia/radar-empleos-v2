@@ -29,8 +29,11 @@ def test_hash_is_stable_for_same_canonical_url():
     assert _stable_hash(a) == _stable_hash(b)
 
 
-def test_relative_published_date_is_not_fabricated():
-    assert _parse_published_at("hace 3 días") is None
+def test_relative_published_date_is_parsed_without_fabricating_unknown_dates():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+    assert _parse_published_at("hace 3 días", now=now) == "2026-11-20T12:00:00+00:00"
+    assert _parse_published_at("fecha desconocida", now=now) is None
 
 
 def test_iso_published_date_is_normalized():
@@ -140,13 +143,10 @@ def test_linkedin_failure_does_not_stop_other_portals(monkeypatch):
 
 
 
-def test_relative_publication_dates_are_parsed_without_fabrication():
+def test_english_relative_publication_dates_are_parsed():
     from datetime import datetime, timezone
-
     now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
-    assert _parse_published_at("hace 3 días", now=now) == "2026-11-20T12:00:00+00:00"
     assert _parse_published_at("2 days ago", now=now) == "2026-11-21T12:00:00+00:00"
-    assert _parse_published_at("fecha desconocida", now=now) is None
 
 
 class _EmptyQuery:
