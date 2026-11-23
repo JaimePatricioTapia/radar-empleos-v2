@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Callable, Any
 
 from src.config import get_settings
+from src.cv.embeddings import EmbeddingRateLimitError
 from src.search.ingestion import run_discovery
 from src.search.processing import (
     build_job_chunks,
@@ -66,6 +67,8 @@ def run_full_search_pipeline(
         "budget_exhausted": False,
         "budget_remaining": 0,
         "chunks_embedded_last_24h": 0,
+        "api_quota_paused": False,
+        "api_quota_message": None,
     }
     report("Etapa 2/3 · Preparando descripciones y embeddings…")
     previous_pending = None
@@ -90,11 +93,21 @@ def run_full_search_pipeline(
                 "Se conservaron los resultados guardados; puede reintentar."
             )
         previous_pending = pending
-        batch = build_job_chunks(
-            client,
-            user_id=user_id,
-            limit=max(1, min(int(chunk_batch_size), pending)),
-        )
+        try:
+            batch = build_job_chunks(
+                client,
+                user_id=user_id,
+                limit=max(1, min(int(chunk_batch_size), pending)),
+            )
+        except EmbeddingRateLimitError as exc:
+            preparation["api_quota_paused"] = True
+            preparation["api_quota_message"] = str(exc)
+            preparation["pending_remaining"] = pending
+            report(
+                "Gemini mantiene el límite de solicitudes de embeddings; "
+                "se pausó la preparación y se conservaron los lotes guardados."
+            )
+            break
         preparation["offers_chunked"] += int(batch.get("offers_chunked", 0))
         preparation["chunks_saved"] += int(batch.get("chunks_saved", 0))
         preparation["insufficient"] += int(batch.get("insufficient", 0))
@@ -174,11 +187,13 @@ def run_full_search_pipeline(
         "paused_for_free_quota": bool(
             preparation["budget_exhausted"] or evaluation["budget_exhausted"]
         ),
+        "paused_for_api_quota": bool(preparation["api_quota_paused"]),
         "completed": (
             not evaluation["errors"]
             and preparation["pending_remaining"] == 0
             and int(discovery.get("errors", 0)) == 0
             and not preparation["budget_exhausted"]
             and not evaluation["budget_exhausted"]
+            and not preparation["api_quota_paused"]
         ),
     }
