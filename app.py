@@ -252,6 +252,7 @@ def render_search_task():
             metric_cols[3].metric("Duplicadas", event.get("duplicates", 0))
             metric_cols[4].metric("Errores", event.get("errors", 0))
             st.caption(
+                f"Última actualización: {event.get('last_updated_at', 'esperando primer evento')} · "
                 f"Consultas omitidas por fallos repetidos: {event.get('queries_skipped', 0)} · "
                 f"Fuera de 14 días: {event.get('stale_skipped', 0)} · "
                 f"Fecha no informada: {event.get('publication_date_unknown', 0)} · "
