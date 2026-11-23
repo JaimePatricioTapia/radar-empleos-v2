@@ -12,6 +12,7 @@ from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url
 
 logger = logging.getLogger(__name__)
 MAX_PUBLICATION_AGE_DAYS = 14
+MAX_CONSECUTIVE_SOURCE_ERRORS = 2
 
 DEFAULT_TARGET_ROLES = [
     "Business Analyst Minería",
@@ -114,7 +115,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
         raise ValueError("Seleccione al menos un cargo y un portal.")
     limit_per_query = max(1, min(int(limit_per_query), 30))
     planned_queries = sum(len(_queries_for_source(source, roles)) for source in sources)
-    stats = {"queries": planned_queries, "queries_completed": 0, "stopped_early": False,
+    stats = {"queries": planned_queries, "queries_completed": 0, "queries_skipped": 0, "stopped_early": False,
              "total_found": 0, "saved": 0, "duplicates": 0, "stale_skipped": 0,
              "publication_date_unknown": 0, "errors": 0, "by_source": {},
              "error_details": [], "offers": []}
@@ -125,9 +126,28 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
         connector = CONNECTORS[connector_name]
         source_stats = {"found": 0, "saved": 0, "duplicates": 0, "errors": 0}
         source_queries = _queries_for_source(source, roles)
-        for query, query_label in source_queries:
+        consecutive_errors = 0
+        for query_index, (query, query_label) in enumerate(source_queries):
             if should_stop and should_stop():
                 stats["stopped_early"] = True
+                break
+            if consecutive_errors >= MAX_CONSECUTIVE_SOURCE_ERRORS:
+                skipped = len(source_queries) - query_index
+                stats["queries_skipped"] += skipped
+                source_stats["skipped_queries"] = skipped
+                if progress:
+                    progress(f"Se omiten {skipped} consultas restantes de {label} tras {consecutive_errors} errores consecutivos.")
+                if on_progress:
+                    on_progress({
+                        "stage": "discovery", "status": "source_skipped",
+                        "source": source, "source_label": label,
+                        "queries_completed": stats["queries_completed"],
+                        "queries_skipped": stats["queries_skipped"],
+                        "queries_total": planned_queries,
+                        "offers_found": stats["total_found"], "offers_saved": stats["saved"],
+                        "duplicates": stats["duplicates"], "errors": stats["errors"],
+                        "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
+                    })
                 break
             if progress:
                 progress(f"Buscando «{query_label}» en {label}…")
@@ -146,6 +166,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     if source == "linkedin" else limit_per_query
                 )
                 offers = connector(query, limit=query_limit)
+                consecutive_errors = 0
                 for offer in offers:
                     if not offer:
                         continue
@@ -200,6 +221,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
             except Exception as exc:
                 stats["errors"] += 1
                 source_stats["errors"] += 1
+                consecutive_errors += 1
                 detail = f"{label} / {query_label}: {type(exc).__name__}: {exc}"
                 stats["error_details"].append(detail[:500])
                 logger.exception("Falló búsqueda %s para %s", source, query_label)
@@ -209,7 +231,8 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     on_progress({
                         "stage": "discovery", "status": "stopped" if stats["stopped_early"] else "running",
                         "source": source, "source_label": label, "query": query_label,
-                        "queries_completed": stats["queries_completed"], "queries_total": planned_queries,
+                        "queries_completed": stats["queries_completed"], "queries_skipped": stats["queries_skipped"],
+                        "queries_total": planned_queries,
                         "offers_found": stats["total_found"], "offers_saved": stats["saved"],
                         "duplicates": stats["duplicates"], "stale_skipped": stats["stale_skipped"],
                         "publication_date_unknown": stats["publication_date_unknown"],
