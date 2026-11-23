@@ -77,14 +77,15 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
             "cached": True,
         }
 
+    daily_limit = max(1, int(settings.max_daily_evaluations))
     recent = (
         client.table("evaluations").select("id").eq("user_id", user_id)
         .gte("evaluated_at", _rolling_budget_start())
-        .limit(MAX_DAILY_EVALUATIONS).execute().data or []
+        .limit(daily_limit).execute().data or []
     )
-    if len(recent) >= MAX_DAILY_EVALUATIONS:
+    if len(recent) >= daily_limit:
         raise RuntimeError(
-            "Se alcanzó el límite preventivo gratuito de 15 evaluaciones en las "
+            "Se alcanzó el límite preventivo gratuito de evaluaciones configurado en las "
             "últimas 24 horas. No se llamó a Gemini; inténtelo cuando se renueve la ventana."
         )
 
