@@ -33,6 +33,7 @@ def test_relative_published_date_is_parsed_without_fabricating_unknown_dates():
     from datetime import datetime, timezone
     now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
     assert _parse_published_at("hace 3 días", now=now) == "2026-11-20T12:00:00+00:00"
+    assert _parse_published_at("hace 2 meses", now=now) == "2026-09-24T12:00:00+00:00"
     assert _parse_published_at("fecha desconocida", now=now) is None
 
 
