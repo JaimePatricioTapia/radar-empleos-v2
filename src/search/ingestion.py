@@ -234,7 +234,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
             finally:
                 stats["queries_completed"] += 1
                 if on_progress:
-                    on_progress({
+                    notify({
                         "stage": "discovery", "status": "stopped" if stats["stopped_early"] else "running",
                         "source": source, "source_label": label, "query": query_label,
                         "queries_completed": stats["queries_completed"], "queries_skipped": stats["queries_skipped"],
