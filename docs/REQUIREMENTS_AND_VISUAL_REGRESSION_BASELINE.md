@@ -84,6 +84,8 @@ Toda modificación debe:
 | RF-025 | Operación exclusivamente gratuita | El Radar no requiere servicios pagados; aplica filtros locales, caché, deduplicación, límites preventivos y detención segura para proteger cuotas gratuitas. | Crítica |
 | RF-026 | Persistencia incremental de embeddings | Cada sublote de embeddings exitoso se persiste inmediatamente y los reintentos calculan solo los fragmentos faltantes. | Crítica |
 | RF-027 | Recuperación de errores de proveedor | Los errores transitorios 429/5xx respetan retryDelay y backoff; los errores permanentes no se reintentan indefinidamente. | Alta |
+| RF-028 | Estado y progreso observable en tiempo real | Durante la ejecución integral se muestra una barra de progreso basada en eventos reales, etapa actual, portal, cargo/consulta, consultas completadas y pendientes, ofertas encontradas/nuevas/duplicadas, errores, tiempo transcurrido y hora de última actualización. El estado se actualiza al terminar cada consulta/lote y no debe aparentar avance cuando una operación está bloqueada. | Crítica |
+| RF-029 | Detención controlada y procesamiento parcial | Durante la búsqueda, el usuario puede solicitar «Detener y procesar resultados». La aplicación deja de iniciar nuevas consultas después de finalizar o agotar el tiempo de espera de la consulta en curso, persiste el avance, cierra ordenadamente el descubrimiento y continúa automáticamente con preparación semántica y evaluación de todas las ofertas recopiladas. No descarta ni revierte ofertas, embeddings o evaluaciones ya persistidos; lo que quede pendiente debe poder reanudarse. | Crítica |
 
 ## 4. Requisitos de clasificación de ofertas
 
@@ -126,6 +128,7 @@ La siguiente lista es el inventario funcional que debe tener evidencia visual. L
 | VIS-010 | Passkeys | Registro, acceso con Passkey y alternativa de acceso. |
 | VIS-011 | Ejecución cloud | Aplicación iniciada desde la URL Streamlit, pantalla de acceso y estado de servicio sin revelar secretos. |
 | VIS-012 | Carga cloud del CV | Selector de archivo PDF, confirmación de procesamiento y resultado; no mostrar contenido sensible ni ruta del servidor. |
+| VIS-013 | Progreso y control de ejecución | Barra de progreso y panel de estado con etapa, portal/cargo/consulta actual, contadores de consultas y ofertas, errores, última actualización y acción «Detener y procesar resultados» mientras la búsqueda esté activa. Debe distinguir ejecución activa, espera/reintento, detención solicitada, procesamiento parcial, completado y error recuperable. |
 
 ### 5.1 Capturas de referencia
 Guardar capturas aprobadas en `docs/visual-baseline/` con nombres estables:
@@ -173,6 +176,9 @@ Las capturas deben:
 | QA-027 | Presupuesto de embeddings | Al alcanzar 250 fragmentos en una ventana móvil de 24 horas, el Radar detiene nuevas solicitudes y conserva pendientes. | Crítica |
 | QA-028 | Presupuesto de evaluaciones | Al alcanzar 15 evaluaciones en una ventana móvil de 24 horas, el Radar detiene llamadas generativas adicionales. | Crítica |
 | QA-029 | Servicios exclusivamente gratuitos | La configuración y el flujo no requieren activar facturación ni usar modelos/servicios de pago. | Crítica |
+| QA-030 | Progreso real de búsqueda | Al completar consultas se actualizan etapa, portal, cargo, contadores y última actividad; los errores y reintentos se identifican. La barra no aumenta por tiempo transcurrido ni muestra porcentajes inventados. | Crítica |
+| QA-031 | Detener y procesar resultados parciales | Al solicitar la detención durante descubrimiento, no se inician nuevas consultas tras cerrar la actual; las ofertas ya encontradas permanecen persistidas y se ejecutan preparación y evaluación automáticamente sobre el conjunto recopilado. | Crítica |
+| QA-032 | Recuperación después de detener | Si falla la preparación/evaluación posterior o se interrumpe la sesión, se conservan resultados y lotes completados; al reanudar se procesan solo pendientes, sin duplicar ofertas ni repetir embeddings/evaluaciones ya guardados. | Crítica |
 
 ## 7. Procedimiento de auditoría visual por versión
 
@@ -223,6 +229,7 @@ Mantener un registro por cambio con esta estructura:
 | CHG-2026-001 | 2026-11-21 | RF-007, RF-017, RF-018, VIS-003–VIS-005, QA-006–QA-007, QA-018–QA-020 | El propietario autorizó elevar el umbral de recomendación de 75% a 85% y consolidar búsqueda, preparación semántica y evaluación en una única acción con continuidad y recuperación. | Aprobado para implementación; pendiente de código y pruebas. |
 | CHG-2026-002 | 2026-11-22 | RF-019–RF-022, VIS-011–VIS-012, QA-021–QA-024 | El propietario autorizó preparar Radar 2.0 para Streamlit Community Cloud, mantener GitHub privado, procesar CV mediante carga temporal y aislar clientes de Supabase por sesión. No autoriza hacer público el repositorio ni cambiar el esquema de Supabase. | Aprobado para implementación; pendiente de pruebas integradas y autorización GitHub/Streamlit. |
 | CHG-2026-003 | 2026-11-23 | RF-025–RF-027, QA-025–QA-029 | El propietario ordenó priorizar operación exclusivamente gratuita y optimización estricta de cuota. Se autorizó auditoría comparativa con Radar original, filtros locales, presupuestos preventivos, reintentos con retryDelay y persistencia incremental/reanudable de embeddings. No se autorizan servicios pagados ni cambios de esquema Supabase. | Implementado y fusionado mediante PR #10; 51 pruebas aprobadas. Pendiente smoke test en la URL pública de Streamlit. |
+| CHG-2026-004 | 2026-11-23 | RF-028–RF-029, VIS-013, QA-030–QA-032 | El propietario solicita visibilidad verificable del avance durante la búsqueda y una acción segura para detener el descubrimiento y procesar automáticamente las ofertas recopiladas, preservando persistencia incremental y reanudación. | Aprobado para especificación; implementación y pruebas pendientes. |
 
 Las nuevas decisiones se agregan como filas; no se sobrescriben decisiones históricas. Toda modificación futura de este documento requiere presentar previamente la propuesta al propietario y esperar su autorización explícita.
 
