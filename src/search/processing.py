@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from src.config import get_settings
 from src.cv.embeddings import embed_texts
@@ -179,7 +179,10 @@ def _local_relevance_score(offer: dict) -> int:
     return score
 
 
-def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
+def build_job_chunks(
+    client: Any, *, user_id: str, limit: int = 100,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
     """Prepara ofertas prioritarias y persiste cada sublote apenas se calcula."""
     settings = get_settings()
     if not settings.gemini_api_key:
@@ -268,7 +271,10 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
             "budget_exhausted": bool(eligible) and budget_remaining == 0,
         }
 
+    embedded_so_far = 0
+
     def persist_batch(start_index: int, batch_texts: list[str], vectors: list[list[float]]) -> None:
+        nonlocal embedded_so_far
         rows = []
         for offset, vector in enumerate(vectors):
             source = chunk_rows[start_index + offset]
@@ -283,6 +289,13 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
         # Actualizar memoria local para que el resultado cuente únicamente lo confirmado.
         for row in rows:
             existing_by_offer.setdefault(row["job_offer_id"], set()).add(int(row["chunk_index"]))
+        embedded_so_far += len(rows)
+        if on_progress:
+            on_progress({
+                "chunks_saved": embedded_so_far,
+                "chunks_total": len(chunk_rows),
+                "embedding_batch": start_index // 90 + 1,
+            })
 
     embed_texts(
         [row["content"] for row in chunk_rows],
@@ -313,7 +326,10 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
     }
 
 
-def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
+def evaluate_top_offers(
+    client: Any, *, user_id: str, top_k: int = 35,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
     """Evalúa con Gemini solo el top semántico y ofertas aún no evaluadas con el CV activo."""
     settings = get_settings()
     if not settings.gemini_api_key:
@@ -347,17 +363,28 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
              "skipped_existing": 0, "skipped_excluded": 0,
              "errors": [], "results": [], "budget_exhausted": False,
              "budget_remaining": daily_remaining}
-    for candidate in ranked:
+    def notify_evaluation(processed: int) -> None:
+        if on_progress:
+            on_progress({
+                "offers_processed": processed,
+                "offers_total": len(ranked),
+                "evaluated": stats["evaluated"],
+                "errors": len(stats["errors"]),
+            })
+
+    for candidate_index, candidate in enumerate(ranked, start=1):
         offer_id = candidate["job_offer_id"]
         previous = (client.table("evaluations").select("id")
                     .eq("user_id", user_id).eq("job_offer_id", offer_id)
                     .eq("cv_version_id", cv_version["id"]).limit(1).execute().data or [])
         if previous:
             stats["skipped_existing"] += 1
+            notify_evaluation(candidate_index)
             continue
         offer_rows = (client.table("job_offers").select("*").eq("id", offer_id)
                       .eq("user_id", user_id).limit(1).execute().data or [])
         if not offer_rows:
+            notify_evaluation(candidate_index)
             continue
         offer = offer_rows[0]
         reason = _excluded_reason(offer)
@@ -369,6 +396,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "raw_metadata": {**metadata, "evaluation_filter": reason}
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["skipped_excluded"] += 1
+            notify_evaluation(candidate_index)
             continue
         evidence_rows = (client.rpc("retrieve_cv_evidence_for_offer", {
             "target_job_offer_id": offer_id, "match_count": CV_EVIDENCE_MATCH_COUNT
@@ -379,6 +407,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         } for row in evidence_rows]
         if not evidence:
             stats["errors"].append(f"{offer.get('title')}: no se recuperó evidencia CV.")
+            notify_evaluation(candidate_index)
             continue
         try:
             description = (offer.get("description") or "").strip()
@@ -431,6 +460,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "sector_category": sector, "raw_metadata": metadata,
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["evaluated"] += 1
+            notify_evaluation(candidate_index)
             if not meets_affinity_threshold(affinity):
                 # Se conserva la evaluación para trazabilidad, pero no se presenta
                 # como recomendación ni vuelve a consumir Gemini.
@@ -446,6 +476,7 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         except Exception as exc:
             logger.exception("Falló evaluación de oferta %s", offer_id)
             stats["errors"].append(f"{offer.get('title')}: {type(exc).__name__}: {exc}")
+            notify_evaluation(candidate_index)
     # La compatibilidad profesional manda; el sector solo desempata.
     stats["results"].sort(
         key=lambda item: (item["affinity_score"], item["priority_score"]),
