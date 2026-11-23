@@ -213,7 +213,7 @@ Mantener un registro por cambio con esta estructura:
 - Clasificación de ofertas: existe actualmente un selector de estado con botón «Guardar estado» en cada tarjeta. El usuario reporta que echa de menos la botonera de clasificación rápida; la restauración de acciones directas y la vista de historial quedan como trabajo pendiente.
 - Passkeys: trabajo separado en rama propia; no se considera implementado.
 - Capturas visuales aprobadas: pendientes de levantar desde la aplicación real.
-- Control de cuota gratuita: se está implementando en rama independiente con 250 fragmentos de ofertas y 15 evaluaciones por ventana móvil de 24 horas; estos son topes preventivos internos, no cuotas oficiales de Google.
+- Control de cuota gratuita: implementado en rama independiente con valores predeterminados de 250 fragmentos de ofertas y 15 evaluaciones por ventana móvil de 24 horas, configurables mediante RADAR_MAX_DAILY_JOB_CHUNKS y RADAR_MAX_DAILY_EVALUATIONS; son topes preventivos internos, no cuotas oficiales de Google. Pruebas integradas y despliegue siguen pendientes.
 - Acceso público autenticado con datos privados por usuario: decisión de arquitectura acordada; requiere prueba de aislamiento multiusuario y protección del despliegue antes de abrir registros a terceros.
 
 ## 10. Registro incremental de cambios aprobados
