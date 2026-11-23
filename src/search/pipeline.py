@@ -21,6 +21,9 @@ def run_full_search_pipeline(
     sources: list[str],
     limit_per_query: int = 10,
     progress: Callable[[str], None] | None = None,
+    on_progress: Callable[[dict], None] | None = None,
+    on_offer: Callable[[dict], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
     chunk_batch_size: int = 100,
     evaluation_batch_size: int = 1000,
 ) -> dict:
@@ -55,6 +58,9 @@ def run_full_search_pipeline(
         sources=sources,
         limit_per_query=limit_per_query,
         progress=progress,
+        on_progress=on_progress,
+        on_offer=on_offer,
+        should_stop=should_stop,
     )
 
     preparation = {
@@ -188,8 +194,10 @@ def run_full_search_pipeline(
             preparation["budget_exhausted"] or evaluation["budget_exhausted"]
         ),
         "paused_for_api_quota": bool(preparation["api_quota_paused"]),
+        "stopped_early": bool(discovery.get("stopped_early")),
         "completed": (
-            not evaluation["errors"]
+            not discovery.get("stopped_early", False)
+            and not evaluation["errors"]
             and preparation["pending_remaining"] == 0
             and int(discovery.get("errors", 0)) == 0
             and not preparation["budget_exhausted"]
