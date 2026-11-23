@@ -135,7 +135,7 @@ selected_roles = st.multiselect(
     default=DEFAULT_TARGET_ROLES,
 )
 limit_per_query = st.slider(
-    "Máximo de resultados por cargo y portal",
+    "Máximo de resultados por consulta y portal",
     min_value=5,
     max_value=30,
     value=10,
