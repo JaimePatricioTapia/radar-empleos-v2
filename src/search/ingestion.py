@@ -57,16 +57,22 @@ def _parse_published_at(value, *, now: datetime | None = None):
                 dt = now - timedelta(days=1)
             else:
                 relative = re.search(
-                    r"(?:hace\s*)?(\d+)\s*(d[ií]as?|days?|hours?|horas?|weeks?|semanas?)\s*(?:atr[aá]s|ago)?",
+                    r"(?:hace\s*)?(\d+)\s*(minutos?|minutes?|d[ií]as?|days?|hours?|horas?|weeks?|semanas?|mes(?:es)?|months?|a[nñ]os?|years?)\s*(?:atr[aá]s|ago)?",
                     lowered,
                 )
                 if relative:
                     amount = int(relative.group(1))
                     unit = relative.group(2)
-                    if unit.startswith(("h", "hora")):
+                    if unit.startswith(("m", "minut")) and unit not in {"mes", "meses", "month", "months"}:
+                        dt = now - timedelta(minutes=amount)
+                    elif unit.startswith(("h", "hora")):
                         dt = now - timedelta(hours=amount)
                     elif unit.startswith(("w", "semana")):
                         dt = now - timedelta(weeks=amount)
+                    elif unit.startswith(("mes", "month")):
+                        dt = now - timedelta(days=30 * amount)
+                    elif unit.startswith(("año", "ano", "year")):
+                        dt = now - timedelta(days=365 * amount)
                     else:
                         dt = now - timedelta(days=amount)
                 else:
