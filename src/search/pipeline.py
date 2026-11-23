@@ -189,7 +189,14 @@ def run_full_search_pipeline(
         "budget_remaining": 15,
     }
     report("Etapa 3/3 · Comparando requisitos de las ofertas con evidencia del CV…")
-    emit_stage("evaluation", status="running", message="Comparando ofertas con evidencia del CV")
+    emit_stage(
+        "evaluation", status="running",
+        message="Comparando ofertas con evidencia del CV",
+        embedding_budget_remaining=preparation["budget_remaining"],
+        embedding_chunks_used=preparation["chunks_embedded_last_24h"],
+        preparation_pending=preparation["pending_remaining"],
+        preparation_budget_exhausted=preparation["budget_exhausted"],
+    )
     configured_daily_limit = max(1, int(get_settings().max_daily_evaluations))
     evaluation_limit = max(1, min(int(evaluation_batch_size), configured_daily_limit))
     while True:
