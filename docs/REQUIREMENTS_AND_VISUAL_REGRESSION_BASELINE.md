@@ -412,3 +412,40 @@ Los límites originales de 250 fragmentos y 15 evaluaciones por ventana móvil d
 | ID | Fecha | Requisitos | Decisión autorizada | Estado |
 |---|---|---|---|---|
 | CHG-2026-008 | 2026-11-24 | RF-042–RF-044, QA-051–QA-053 | Elevar temporalmente los topes internos para medir la cuota efectiva de Gemini; mantener persistencia incremental, lotes de 90 y pausa de 60 segundos. Sin cambios en Supabase, facturación, credenciales o cuotas Google. | En revisión y CI. |
+
+
+## 16. Pausa recuperable por retryDelay extenso de Gemini y tolerancia a fallas de portales (CHG-2026-009)
+
+### Hallazgo de ejecución real — 2026-11-24
+
+La aplicación desplegada informó: «Gemini evaluación transitoria (ClientError); reintento 1/4 en 22239.0 s». El evaluador utilizaba el retryDelay informado por Google directamente en time.sleep dentro del worker, lo que podía mantener la ejecución bloqueada aproximadamente 6 h 10 min. En la misma búsqueda, BNE respondió timeout de 12 s, Codelco respondió HTTP 403 y Finning HTTP 429.
+
+### Decisión correctiva
+
+- Si Gemini solicita esperar más de 60 segundos, Radar pausa la etapa de evaluación de inmediato y devuelve el control; no realiza una espera prolongada dentro del worker.
+- Las evaluaciones ya confirmadas se mantienen. Las ofertas no evaluadas siguen pendientes y pueden recuperarse en una ejecución posterior sin recalcular evaluaciones existentes.
+- Los reintentos breves de hasta 60 segundos se mantienen acotados.
+- Los errores HTTP por portal permanecen aislados: 403/429 no se evaden ni se martillan con reintentos; se informa la incidencia y se permite continuar con otras fuentes. El circuito de fuente ya omite consultas posteriores tras errores consecutivos.
+
+### Requisitos nuevos
+
+| ID | Requisito | Criterio de aceptación | Prioridad |
+|---|---|---|---|
+| RF-045 | No bloquear por retryDelay largo | Si Gemini indica espera >60 s, no se ejecuta sleep prolongado; la etapa se pausa y comunica segundos indicados. | Crítica |
+| RF-046 | Recuperación de evaluación pendiente | La pausa no elimina ofertas ni evaluaciones ya guardadas; las pendientes se vuelven a considerar en una ejecución posterior sin duplicar evaluaciones. | Crítica |
+| RF-047 | Continuidad multifuente ante errores HTTP | Timeout, 403 y 429 de una fuente se registran por portal; no impiden consultar las fuentes restantes ni activan evasión de controles. | Alta |
+
+### Pruebas nuevas
+
+| ID prueba | Escenario | Resultado esperado |
+|---|---|---|
+| QA-054 | Gemini responde 429 con retryDelay de 22.239 s | Radar no duerme 6 h; devuelve pausa por cuota y conserva trabajo pendiente. |
+| QA-055 | Gemini responde con retryDelay de 0,5 s | Se conserva el reintento breve y acotado. |
+| QA-056 | El evaluador pausa por cuota dentro del lote | La etapa 3 termina en estado pausado, no como ejecución exitosa ni como error fatal. |
+| QA-057 | BNE timeout, Codelco 403 o Finning 429 | Se registra la fuente fallida y las demás fuentes continúan. |
+
+### Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-009 | 2026-11-24 | RF-045–RF-047, QA-054–QA-057 | El propietario solicita corregir el bloqueo por retryDelay extenso y preservar la continuidad de búsqueda multifuente, manteniendo operación gratuita, persistencia y seguridad existentes. | Implementado en rama fix/gemini-long-retry-and-source-errors-2.1.3; pendiente CI y revisión. |
