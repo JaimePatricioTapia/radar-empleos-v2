@@ -9,6 +9,7 @@ from typing import Callable
 
 from src.db.repository import upsert_job_offer
 from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url
+from src.search.relevance import assess_offer_relevance
 
 logger = logging.getLogger(__name__)
 MAX_PUBLICATION_AGE_DAYS = 14
@@ -124,6 +125,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
     planned_queries = sum(len(_queries_for_source(source, roles)) for source in sources)
     stats = {"queries": planned_queries, "queries_completed": 0, "queries_skipped": 0, "stopped_early": False,
              "total_found": 0, "saved": 0, "duplicates": 0, "stale_skipped": 0,
+             "irrelevant_skipped": 0, "filtered_examples": [],
              "publication_date_unknown": 0, "errors": 0, "by_source": {},
              "error_details": [], "offers": []}
     started_at = datetime.now(timezone.utc)
@@ -141,7 +143,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
     for source in sources:
         label, connector_name = SOURCE_REGISTRY[source]
         connector = CONNECTORS[connector_name]
-        source_stats = {"found": 0, "saved": 0, "duplicates": 0, "errors": 0}
+        source_stats = {"found": 0, "saved": 0, "duplicates": 0, "irrelevant_skipped": 0, "errors": 0}
         source_queries = _queries_for_source(source, roles)
         consecutive_errors = 0
         for query_index, (query, query_label) in enumerate(source_queries):
@@ -162,7 +164,8 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         "queries_skipped": stats["queries_skipped"],
                         "queries_total": planned_queries,
                         "offers_found": stats["total_found"], "offers_saved": stats["saved"],
-                        "duplicates": stats["duplicates"], "errors": stats["errors"],
+                        "duplicates": stats["duplicates"], "irrelevant_skipped": stats["irrelevant_skipped"],
+                        "errors": stats["errors"],
                         "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
                     })
                 break
@@ -201,6 +204,17 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         continue
                     stats["total_found"] += 1
                     source_stats["found"] += 1
+                    is_relevant, relevance_reason = assess_offer_relevance(offer)
+                    if not is_relevant:
+                        stats["irrelevant_skipped"] += 1
+                        source_stats["irrelevant_skipped"] += 1
+                        if len(stats["filtered_examples"]) < 12:
+                            stats["filtered_examples"].append({
+                                "title": str(offer.get("title") or "Sin título")[:180],
+                                "source": source,
+                                "reason": relevance_reason,
+                            })
+                        continue
                     offer["job_hash"] = _stable_hash(offer)
                     # Procedencia auditable de la consulta, almacenada en JSON existente.
                     if source == "linkedin":
@@ -292,6 +306,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                         "queries_total": planned_queries,
                         "offers_found": stats["total_found"], "offers_saved": stats["saved"],
                         "duplicates": stats["duplicates"], "stale_skipped": stats["stale_skipped"],
+                        "irrelevant_skipped": stats["irrelevant_skipped"],
                         "publication_date_unknown": stats["publication_date_unknown"],
                         "errors": stats["errors"],
                         "elapsed_seconds": int((datetime.now(timezone.utc)-started_at).total_seconds()),
