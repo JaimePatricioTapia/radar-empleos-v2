@@ -193,7 +193,9 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     results = []
-    for card in soup.select("div.job-item, div.destacado, article")[:limit]:
+    # Evitar el fallback genérico a cualquier <article>: varias páginas incluyen
+    # artículos editoriales/recomendaciones que no son tarjetas de vacantes.
+    for card in soup.select("div.job-item, div.destacado")[:limit]:
         link = card.select_one("h2.title a, h3.title a, a[href*='/trabajo/']")
         if not link:
             continue
@@ -207,7 +209,7 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
                 detail = _request_get(url, timeout=DETAIL_TIMEOUT)
                 if detail.ok:
                     detail_soup = BeautifulSoup(detail.text, "html.parser")
-                    body = detail_soup.select_one(".job-description, .descripcion, article, .content")
+                    body = detail_soup.select_one(".job-description, .descripcion, [itemprop='description']")
                     if body:
                         description = body.get_text(" ", strip=True)
             except requests.RequestException:
