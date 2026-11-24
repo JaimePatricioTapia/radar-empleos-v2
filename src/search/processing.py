@@ -14,9 +14,9 @@ from src.search.job_chunker import chunk_job_description
 logger = logging.getLogger(__name__)
 
 MINIMUM_AFFINITY_SCORE = 85
-# Límites conservadores propios del Radar; no representan la cuota publicada por Google.
-MAX_DAILY_JOB_CHUNKS = 250
-MAX_DAILY_EVALUATIONS = 15
+# Topes operativos temporales para medir la cuota real de Gemini; configurables en src/config.py.
+MAX_DAILY_JOB_CHUNKS = 1000
+MAX_DAILY_EVALUATIONS = 100
 CV_EVIDENCE_MATCH_COUNT = 8
 MAX_EVALUATION_DESCRIPTION_CHARS = 10000
 ROLLING_BUDGET_HOURS = 24
