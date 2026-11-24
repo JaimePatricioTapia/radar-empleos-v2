@@ -358,10 +358,24 @@ def evaluate_top_offers(
     ranked = client.rpc("rank_job_offers_by_cv", {
         "match_limit": max(1, min(int(top_k), daily_remaining, daily_evaluation_limit))
     }).execute().data or []
+    ranking_diagnostic = None
+    if not ranked:
+        chunk_probe = (
+            client.table("job_chunks").select("id")
+            .eq("user_id", user_id).limit(1).execute().data or []
+        )
+        ranking_diagnostic = (
+            "El ranking semántico devolvió cero candidatos aunque existen fragmentos de ofertas. "
+            "Revise el contexto de autenticación del RPC rank_job_offers_by_cv."
+            if chunk_probe else
+            "No hay fragmentos semánticos de ofertas disponibles para evaluar. "
+            "La preparación está pendiente o alcanzó su presupuesto diario."
+        )
     stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
              "skipped_existing": 0, "skipped_excluded": 0,
-             "errors": [], "results": [], "budget_exhausted": False,
+             "errors": [ranking_diagnostic] if ranking_diagnostic else [],
+             "results": [], "budget_exhausted": False,
              "budget_remaining": daily_remaining}
     def notify_evaluation(processed: int) -> None:
         if on_progress:

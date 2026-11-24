@@ -33,3 +33,41 @@ def test_search_task_runs_pipeline_and_streams_events():
     while not task.events.empty():
         event_types.append(task.events.get_nowait()["type"])
     assert event_types == ["message", "progress", "offer", "finished"]
+
+def test_worker_uses_isolated_client_with_authenticated_user_jwt():
+    from types import SimpleNamespace
+    from src.search import task_runner
+
+    session = SimpleNamespace(access_token="user-access-token", refresh_token="user-refresh-token")
+    source_client = SimpleNamespace(auth=SimpleNamespace(
+        get_session=lambda: SimpleNamespace(session=session)
+    ))
+    worker_client = SimpleNamespace(auth=SimpleNamespace(
+        set_session=lambda access, refresh: (access, refresh)
+    ))
+
+    with (
+        patch.object(task_runner, "get_settings", return_value=SimpleNamespace(
+            supabase_url="https://example.supabase.co", supabase_key="publishable-key"
+        )),
+        patch.object(task_runner, "create_client", return_value=worker_client) as factory,
+    ):
+        result = task_runner._authenticated_worker_client(source_client)
+
+    factory.assert_called_once_with("https://example.supabase.co", "publishable-key")
+    assert result is worker_client
+    assert worker_client.auth.set_session("user-access-token", "user-refresh-token") == (
+        "user-access-token", "user-refresh-token"
+    )
+
+
+def test_worker_fails_fast_if_authenticated_session_is_missing():
+    from types import SimpleNamespace
+    from src.search.task_runner import _authenticated_worker_client
+
+    client = SimpleNamespace(auth=SimpleNamespace(
+        get_session=lambda: SimpleNamespace(session=None)
+    ))
+    import pytest
+    with pytest.raises(RuntimeError, match="sesión autenticada"):
+        _authenticated_worker_client(client)

@@ -347,3 +347,39 @@ Añadir VIS-015: «Perfil ocupacional y familias de búsqueda», con evidencia d
 |---|---|---|---|---|
 | CHG-2026-006 | 2026-11-23 | RF-033–RF-038, VIS-015, QA-037–QA-045 | El propietario autoriza incorporar al Radar la metodología de ai-job-search: perfil desde CV, familias funcionales priorizadas, alias/términos de búsqueda, descubrimiento por competencias y dominio, trazabilidad de consultas y evaluación final contra el CV completo. Se mantienen 85%, 14 días, operación gratuita, progreso/detención segura y esquema Supabase existente. | En implementación en rama feature/cv-derived-role-families; pendiente CI, revisión y smoke test cloud. |
 
+
+
+## 14. Autenticación del worker y diagnóstico de cero evaluaciones (CHG-2026-007)
+
+### Hallazgo de ejecución real — 2026-11-23
+
+La sesión de prueba descubrió ofertas y las persistió, pero la etapa 3 mostró 0 evaluadas, 0 preseleccionadas y 0 incidencias. La inspección de solo lectura de Supabase confirmó 1.053 ofertas nuevas históricas, 413 con descripciones utilizables, 250 fragmentos de ofertas y 0 evaluaciones. Los 250 fragmentos se crearon dentro de las últimas 24 horas, alcanzando el presupuesto preventivo configurado. Una prueba SQL controlada con el contexto JWT del usuario devolvió candidatos en `rank_job_offers_by_cv`, lo que demuestra que existen ofertas semánticamente rankeables cuando `auth.uid()` está disponible. El worker anterior reutilizaba el mismo cliente Supabase del hilo Streamlit; el contexto Auth del RPC no estaba garantizado en el hilo secundario.
+
+### Decisión correctiva
+
+El worker debe crear un cliente Supabase independiente en el hilo principal, capturar la sesión del usuario autenticado y establecerla explícitamente con `auth.set_session(access_token, refresh_token)`. Se conserva la clave pública/anon configurada; nunca se usa service_role. Si no existe sesión válida, el proceso debe fallar temprano con un mensaje claro, no continuar con consultas RPC que devuelvan listas vacías.
+
+### Requisitos nuevos
+
+| ID | Requisito | Criterio de aceptación | Prioridad |
+|---|---|---|---|
+| RF-039 | Propagación segura de sesión al worker | El cliente de segundo plano es independiente y conserva el JWT del usuario mediante set_session; RLS y auth.uid() se mantienen activos; no se utiliza service_role ni se registran tokens. | Crítica |
+| RF-040 | Cero candidatos nunca silencioso | Si el ranking devuelve 0 y existen job_chunks, se reporta diagnóstico de posible contexto Auth/RPC; si no hay chunks, se informa falta de preparación o presupuesto. No presentar 0 evaluaciones como éxito silencioso. | Crítica |
+| RF-041 | Visibilidad del presupuesto durante evaluación | La etapa 3 muestra fragmentos usados/permitidos en 24 h, presupuesto restante y ofertas pendientes de preparación. Si se agotó el tope, se informa que se evaluarán los avisos previamente preparados y que los nuevos quedan pendientes. | Crítica |
+
+### Pruebas nuevas
+
+| ID | Escenario | Resultado esperado |
+|---|---|---|
+| QA-046 | Worker inicia desde una sesión autenticada | Crea cliente independiente, llama set_session con los tokens de esa sesión y ejecuta el pipeline con dicho cliente. |
+| QA-047 | Sesión ausente o inválida | Falla temprano con mensaje accionable; no ejecuta el pipeline con identidad nula. |
+| QA-048 | RPC semántico devuelve cero y hay job_chunks | Se registra incidencia explícita sobre contexto Auth/RPC. |
+| QA-049 | RPC devuelve cero y no hay job_chunks | Se informa que no existen fragmentos preparados y se distingue el presupuesto agotado. |
+| QA-050 | Presupuesto de embeddings agotado pero hay chunks previos | La interfaz muestra consumo, saldo cero y pendientes; continúa evaluación de chunks existentes. |
+
+### Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-007 | 2026-11-23 | RF-039–RF-041, QA-046–QA-050 | Corregir el contexto Auth del cliente Supabase en el worker, evitar ranking vacío silencioso y transparentar presupuesto/pendientes durante la etapa de evaluación. Mantener RLS, clave pública, topes y esquema existente. | Implementado en rama fix/background-supabase-auth-evaluation; pendiente CI y despliegue. |
+
