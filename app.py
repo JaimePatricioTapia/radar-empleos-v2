@@ -323,9 +323,10 @@ def render_search_task():
             metric_cols[0].metric("Consultas", f"{event.get('queries_completed', 0) + event.get('queries_skipped', 0)}/{event.get('queries_total', estimated_queries)}")
             metric_cols[1].metric("Encontradas", event.get("offers_found", 0))
             metric_cols[2].metric("Nuevas guardadas", event.get("offers_saved", 0))
-            metric_cols[3].metric("Duplicadas", event.get("duplicates", 0))
+            metric_cols[3].metric("Descartadas por pertinencia", event.get("irrelevant_skipped", 0))
             metric_cols[4].metric("Errores", event.get("errors", 0))
             st.caption(
+                f"Duplicadas: {event.get('duplicates', 0)} · "
                 f"Consultas omitidas por fallos repetidos: {event.get('queries_skipped', 0)} · "
                 f"Fuera de 14 días: {event.get('stale_skipped', 0)} · "
                 f"Fecha no informada: {event.get('publication_date_unknown', 0)} · "
@@ -381,6 +382,7 @@ def render_search_task():
             cols[4].metric("Afinidad ≥85%", len(evaluation.get("results", [])))
             st.caption(
                 f"Duplicadas: {discovery.get('duplicates', 0)} · "
+                f"Descartadas por pertinencia: {discovery.get('irrelevant_skipped', 0)} · "
                 f"Consultas omitidas por fallos repetidos: {discovery.get('queries_skipped', 0)} · "
                 f"Fuera de 14 días: {discovery.get('stale_skipped', 0)} · "
                 f"Fecha no informada: {discovery.get('publication_date_unknown', 0)} · "
@@ -394,8 +396,14 @@ def render_search_task():
                 st.write(
                     f"**{source_labels.get(source, source)}:** "
                     f"{values.get('found', 0)} encontradas · {values.get('saved', 0)} nuevas · "
-                    f"{values.get('duplicates', 0)} duplicadas · {values.get('errors', 0)} errores"
+                    f"{values.get('duplicates', 0)} duplicadas · "
+                    f"{values.get('irrelevant_skipped', 0)} descartadas por pertinencia · "
+                    f"{values.get('errors', 0)} errores"
                 )
+            if discovery.get("filtered_examples"):
+                with st.expander("Ofertas descartadas por falta de pertinencia"):
+                    for item in discovery.get("filtered_examples", []):
+                        st.write(f"- **{item.get('title')}** · {item.get('source')} · {item.get('reason')}")
             if discovery.get("error_details") or evaluation.get("errors"):
                 with st.expander("Ver incidencias"):
                     for error in discovery.get("error_details", []):
