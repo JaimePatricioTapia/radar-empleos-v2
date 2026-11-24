@@ -23,3 +23,14 @@
 5. Validar la ingesta del CV local y búsqueda semántica con Gemini.
 6. Migrar la lógica de evaluación y conectar benchmark humano.
 7. Auditar y portar ingesta y Streamlit.
+
+
+## 2026-11-24 — Elevación temporal de topes internos para medir cuota Gemini (CHG-2026-008)
+
+- Se confirma que 250 fragmentos y 15 evaluaciones por 24 horas eran topes internos de Radar, no límites publicados por Google.
+- Se elevan temporalmente a 1.000 fragmentos y 100 evaluaciones por ventana móvil de 24 horas para medir el comportamiento real de Gemini con el proyecto configurado.
+- Se mantienen lotes de 90 embeddings, espera de 60 segundos entre lotes y reintentos ante errores transitorios.
+- Un error 429/RESOURCE_EXHAUSTED se conserva como señal de límite real; no se reintenta indefinidamente.
+- Los topes siguen siendo configurables mediante RADAR_MAX_DAILY_JOB_CHUNKS y RADAR_MAX_DAILY_EVALUATIONS en entorno/Streamlit Secrets.
+- Esta modificación no aumenta cuotas de Google, no habilita facturación, no modifica Supabase y no altera datos ni credenciales.
+- El aumento no garantiza que se procesen 1.000 fragmentos: la cuota efectiva del modelo y el presupuesto de facturación del proyecto siguen aplicando.
