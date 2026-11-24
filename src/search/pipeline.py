@@ -187,6 +187,9 @@ def run_full_search_pipeline(
         "batches": 0,
         "budget_exhausted": False,
         "budget_remaining": 15,
+        "api_quota_paused": False,
+        "api_quota_message": None,
+        "retry_after_seconds": None,
     }
     report("Etapa 3/3 · Comparando requisitos de las ofertas con evidencia del CV…")
     emit_stage(
@@ -223,19 +226,26 @@ def run_full_search_pipeline(
         )
         evaluation["budget_remaining"] = int(batch.get("budget_remaining", 0))
         evaluation["budget_exhausted"] = bool(batch.get("budget_exhausted", False))
+        evaluation["api_quota_paused"] = bool(batch.get("api_quota_paused", False))
+        evaluation["api_quota_message"] = batch.get("api_quota_message")
+        evaluation["retry_after_seconds"] = batch.get("retry_after_seconds")
         report(
             f"Evaluación: {evaluation['evaluated']} ofertas evaluadas; "
             f"{len(evaluation['errors'])} incidencias."
         )
-        if batch.get("errors") or batch.get("budget_exhausted") or int(batch.get("ranked", 0)) < evaluation_limit:
+        if (batch.get("errors") or batch.get("budget_exhausted")
+                or batch.get("api_quota_paused")
+                or int(batch.get("ranked", 0)) < evaluation_limit):
             break
         if int(batch.get("evaluated", 0)) == 0:
             break
 
     emit_stage(
-        "evaluation", status="completed" if not evaluation["errors"] and not evaluation["budget_exhausted"] else "paused",
+        "evaluation", status="completed" if not evaluation["errors"] and not evaluation["budget_exhausted"] and not evaluation["api_quota_paused"] else "paused",
         evaluated=evaluation["evaluated"], ranked=evaluation["ranked"],
         errors=len(evaluation["errors"]),
+        api_quota_paused=evaluation["api_quota_paused"],
+        message=evaluation["api_quota_message"],
     )
     evaluation["results"].sort(
         key=lambda item: (item["affinity_score"], item["priority_score"]),
@@ -249,7 +259,7 @@ def run_full_search_pipeline(
         "paused_for_free_quota": bool(
             preparation["budget_exhausted"] or evaluation["budget_exhausted"]
         ),
-        "paused_for_api_quota": bool(preparation["api_quota_paused"]),
+        "paused_for_api_quota": bool(preparation["api_quota_paused"] or evaluation["api_quota_paused"]),
         "stopped_early": bool(discovery.get("stopped_early")),
         "completed": (
             not discovery.get("stopped_early", False)
@@ -259,5 +269,6 @@ def run_full_search_pipeline(
             and not preparation["budget_exhausted"]
             and not evaluation["budget_exhausted"]
             and not preparation["api_quota_paused"]
+            and not evaluation["api_quota_paused"]
         ),
     }
