@@ -86,3 +86,11 @@ Se recomienda mantener los valores predeterminados hasta comprobar el consumo re
 - El resumen de ejecución informa cuántas ofertas se descartaron y muestra una muestra de títulos/motivos para auditar falsos positivos.
 - Chiletrabajos deja de tratar cualquier etiqueta `article` como una tarjeta de empleo y restringe la extracción de descripciones a selectores propios de la descripción de la vacante.
 - El filtro es local, gratuito y no modifica tablas, RLS, credenciales ni presupuestos de Supabase/Gemini.
+
+
+## Radar 2.1.1 — Repetición de búsquedas
+
+- Al terminar una ejecución, el resumen ofrece una acción explícita para iniciar otra búsqueda con los portales, cargos y máximo de resultados actualmente seleccionados.
+- No permite solapar dos procesos de búsqueda.
+- Si el presupuesto de embeddings está agotado, advierte que la nueva búsqueda puede descubrir y guardar ofertas, pero no preparará sus embeddings hasta la renovación del límite móvil de 24 horas.
+- Las ofertas y fragmentos ya persistidos se conservan; no se borran al repetir la búsqueda.

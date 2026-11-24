@@ -218,6 +218,11 @@ if not active_cv:
 
 active_search_task = st.session_state.get("radar_search_task")
 search_already_running = active_search_task is not None and not active_search_task.finished
+if search_already_running:
+    st.info(
+        "La ejecución anterior todavía está activa. Para evitar dos procesos simultáneos, "
+        "la nueva búsqueda se habilitará cuando termine el procesamiento actual."
+    )
 run_pipeline = st.button(
     "🚀 Buscar y evaluar ofertas automáticamente",
     type="primary",
@@ -410,7 +415,35 @@ def render_search_task():
                         st.write(f"- {error}")
                     for error in evaluation.get("errors", []):
                         st.write(f"- {error}")
-        if st.button("Cerrar resumen de ejecución", key="radar_close_search_summary"):
+        if result.get("paused_for_free_quota") or int(preparation.get("pending_remaining", 0)) > 0:
+            st.warning(
+                "Puede iniciar otra búsqueda para ampliar el descubrimiento, pero el presupuesto "
+                "de embeddings está agotado. Las ofertas nuevas quedarán guardadas y pendientes "
+                "de preparación hasta que se renueve el límite de 24 horas. No se borrarán "
+                "las ofertas ni los fragmentos ya procesados."
+            )
+        action_cols = st.columns(2)
+        if action_cols[0].button(
+            "🔁 Nueva búsqueda con esta configuración",
+            key="radar_repeat_search",
+            type="primary",
+            use_container_width=True,
+        ):
+            # La tarea anterior ya terminó; iniciar otra no puede solaparse con ella.
+            st.session_state.radar_search_task = start_search_task(
+                client,
+                user_id=user["id"],
+                roles=selected_roles,
+                sources=selected_sources,
+                limit_per_query=limit_per_query,
+                role_context=role_context,
+            )
+            st.rerun()
+        if action_cols[1].button(
+            "Cerrar resumen de ejecución",
+            key="radar_close_search_summary",
+            use_container_width=True,
+        ):
             st.session_state.radar_search_task = None
             st.rerun()
 
