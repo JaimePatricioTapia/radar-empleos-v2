@@ -76,3 +76,13 @@ Se recomienda mantener los valores predeterminados hasta comprobar el consumo re
 - Indeed se consulta de forma independiente por cargo. Un fallo de LinkedIn no detiene Indeed ni los demás portales.
 - Los errores reportados por JobSpy se incorporan al resumen de incidencias, en vez de presentarse como una búsqueda vacía sin explicación.
 - Google Jobs no se ofrece como fuente seleccionable mientras JobSpy 1.5.0 lo reporte no disponible.
+
+
+## Calidad de búsqueda — Radar 2.1.0
+
+- Antes de persistir una oferta, un filtro determinístico comprueba señales de cargos objetivo y funciones de análisis, proyectos TI, producto, datos, riesgo y minería.
+- Ocupaciones claramente ajenas (por ejemplo, conserjería, bodega, ventas presenciales o convivencia escolar) se descartan antes de consumir embeddings o evaluaciones Gemini, salvo que la descripción contenga varias señales técnicas/funcionales fuertes.
+- Los casos dudosos se conservan cuando hay evidencia suficiente; el filtro no exige que el título coincida literalmente con el nombre del cargo.
+- El resumen de ejecución informa cuántas ofertas se descartaron y muestra una muestra de títulos/motivos para auditar falsos positivos.
+- Chiletrabajos deja de tratar cualquier etiqueta `article` como una tarjeta de empleo y restringe la extracción de descripciones a selectores propios de la descripción de la vacante.
+- El filtro es local, gratuito y no modifica tablas, RLS, credenciales ni presupuestos de Supabase/Gemini.
