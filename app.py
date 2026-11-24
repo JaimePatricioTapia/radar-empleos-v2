@@ -105,8 +105,8 @@ st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servido
 uploaded_cv = st.file_uploader("Seleccionar CV (PDF, máximo 15 MB)", type=["pdf"], key="cv_pdf_upload")
 st.caption(
     f"Embeddings: {settings.embedding_model} · {settings.embedding_dimensions} dimensiones · "
-    f"Presupuesto preventivo: {settings.max_daily_job_chunks} fragmentos y "
-    f"{settings.max_daily_evaluations} evaluaciones por 24 h."
+    f"Tope operativo de prueba: {settings.max_daily_job_chunks} fragmentos y "
+    f"{settings.max_daily_evaluations} evaluaciones por 24 h (no son cuotas de Google)."
 )
 if st.button("Procesar mi CV", type="primary", disabled=uploaded_cv is None):
     with st.spinner("Leyendo CV, generando embeddings y guardando información..."):
