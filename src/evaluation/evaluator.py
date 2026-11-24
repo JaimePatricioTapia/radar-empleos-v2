@@ -15,6 +15,16 @@ logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "evaluator_system.md"
 FALLBACK_MODEL = "gemini-3.8-flash"
+MAX_INLINE_RETRY_DELAY_SECONDS = 60
+
+
+class GeminiEvaluationDeferred(RuntimeError):
+    """La API indicó una espera extensa; se pausa sin bloquear el worker."""
+
+    def __init__(self, message: str, retry_after_seconds: float, model: str):
+        super().__init__(message)
+        self.retry_after_seconds = max(0.0, float(retry_after_seconds))
+        self.model = model
 
 
 def load_system_prompt() -> str:
@@ -82,9 +92,18 @@ def evaluate_offer(
                 model_name = FALLBACK_MODEL
                 request["model"] = model_name
                 continue
-            if attempt >= 4 or not _is_retryable_error(exc):
+            if not _is_retryable_error(exc):
                 raise
             delay = _retry_delay_seconds(exc, attempt)
+            if delay > MAX_INLINE_RETRY_DELAY_SECONDS:
+                message = (
+                    f"Gemini solicitó esperar {delay:.0f} segundos para el modelo {model_name}. "
+                    "La evaluación se pausó para no bloquear la aplicación; las ofertas pendientes "
+                    "se conservan para reanudarlas en otra ejecución."
+                )
+                raise GeminiEvaluationDeferred(message, delay, model_name) from exc
+            if attempt >= 4:
+                raise
             logger.warning(
                 "Gemini evaluación transitoria (%s); reintento %s/4 en %.1f s. Modelo=%s",
                 type(exc).__name__, attempt + 1, delay, model_name,
