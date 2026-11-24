@@ -383,3 +383,32 @@ El worker debe crear un cliente Supabase independiente en el hilo principal, cap
 |---|---|---|---|---|
 | CHG-2026-007 | 2026-11-23 | RF-039–RF-041, QA-046–QA-050 | Corregir el contexto Auth del cliente Supabase en el worker, evitar ranking vacío silencioso y transparentar presupuesto/pendientes durante la etapa de evaluación. Mantener RLS, clave pública, topes y esquema existente. | Implementado en rama fix/background-supabase-auth-evaluation; pendiente CI y despliegue. |
 
+
+
+## 15. Topes operativos para medición de cuota Gemini (CHG-2026-008)
+
+### Decisión
+
+Los límites originales de 250 fragmentos y 15 evaluaciones por ventana móvil de 24 horas eran barreras internas preventivas de Radar, no cuotas oficiales de Google. Se elevan temporalmente a 1.000 fragmentos y 100 evaluaciones para medir la capacidad efectiva del proyecto Gemini antes de volver a fijar límites operativos.
+
+### Requisitos nuevos
+
+| ID | Requisito | Criterio de aceptación | Prioridad |
+|---|---|---|---|
+| RF-042 | Distinguir topes Radar de cuotas Google | La interfaz identifica los topes como valores operativos de prueba y aclara que no son cuotas oficiales de Google. | Alta |
+| RF-043 | Medir cuota efectiva de Gemini | Radar permite hasta 1.000 fragmentos y 100 evaluaciones por ventana móvil de 24 horas, manteniendo lotes, pausas y reintentos; los errores 429/RESOURCE_EXHAUSTED se registran y detienen ordenadamente la etapa afectada. | Alta |
+| RF-044 | Mantener configuración explícita | Los topes pueden ajustarse mediante RADAR_MAX_DAILY_JOB_CHUNKS y RADAR_MAX_DAILY_EVALUATIONS; no se modifica facturación ni cuota del proyecto. | Alta |
+
+### Pruebas nuevas
+
+| ID prueba | Escenario | Resultado esperado |
+|---|---|---|
+| QA-051 | Cargar configuración por defecto | Se obtienen 1.000 fragmentos y 100 evaluaciones por 24 horas. |
+| QA-052 | Gemini responde 429/RESOURCE_EXHAUSTED | Se conserva lo persistido, se detiene ordenadamente y se informa el límite efectivo observado. |
+| QA-053 | Operador configura topes por entorno/Secrets | La configuración explícita prevalece sobre los valores por defecto. |
+
+### Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-008 | 2026-11-24 | RF-042–RF-044, QA-051–QA-053 | Elevar temporalmente los topes internos para medir la cuota efectiva de Gemini; mantener persistencia incremental, lotes de 90 y pausa de 60 segundos. Sin cambios en Supabase, facturación, credenciales o cuotas Google. | En revisión y CI. |
