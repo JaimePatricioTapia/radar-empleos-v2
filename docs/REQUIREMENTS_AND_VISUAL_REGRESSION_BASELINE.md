@@ -1,8 +1,8 @@
 # Radar de Empleos 2.0 — Requisitos funcionales y auditoría visual
 
 - **Documento:** RF-RADAR-001
-- **Versión:** 1.1 (línea base + control de cuota gratuita)
-- **Fecha:** 2026-11-23
+- **Versión:** 1.2 (línea base + control de cuota gratuita + preferencias persistentes de búsqueda)
+- **Fecha:** 2026-11-25
 - **Estado:** Borrador controlado para validación del propietario
 - **Rama de trabajo:** `feature/free-tier-token-optimization`
 - **Principio:** una mejora no puede eliminar ni degradar funciones existentes sin aprobación expresa.
@@ -66,7 +66,7 @@ Toda modificación debe:
 | RF-001 | Autenticación | Un usuario no autenticado no puede acceder a pantallas ni datos privados. | Crítica |
 | RF-002 | Aislamiento de datos | Dos usuarios autenticados no pueden leer ni alterar los datos privados del otro. | Crítica |
 | RF-003 | Gestión del CV | Cada usuario puede procesar su CV; el archivo original no se publica ni se expone a otros usuarios. | Crítica |
-| RF-004 | Búsqueda multifuente | Permite seleccionar portales y cargos, ejecutar consultas, informar resultados, duplicados y errores. | Alta |
+| RF-004 | Búsqueda multifuente | Permite seleccionar portales, cargos y funciones; conserva preferencias personalizadas por usuario y reporta resultados, duplicados y errores. | Alta |
 | RF-005 | Preparación semántica | Permite preparar ofertas por lotes sin ejecutar la evaluación generativa de Gemini. | Alta |
 | RF-006 | Evaluación de afinidad | Evalúa ofertas con evidencia recuperada del CV y conserva trazabilidad del resultado. | Alta |
 | RF-007 | Umbral de recomendación | Solo se muestran como recomendadas las ofertas con afinidad >= 85%, calculada contrastando requisitos de la oferta con evidencia verificable del CV. | Alta |
@@ -449,3 +449,86 @@ La aplicación desplegada informó: «Gemini evaluación transitoria (ClientErro
 | ID | Fecha | Requisitos | Decisión autorizada | Estado |
 |---|---|---|---|---|
 | CHG-2026-009 | 2026-11-24 | RF-045–RF-047, QA-054–QA-057 | El propietario solicita corregir el bloqueo por retryDelay extenso y preservar la continuidad de búsqueda multifuente, manteniendo operación gratuita, persistencia y seguridad existentes. | Implementado en rama fix/gemini-long-retry-and-source-errors-2.1.3; pendiente CI y revisión. |
+
+
+---
+
+## 17. Preferencias persistentes de búsqueda por usuario (CHG-2026-010)
+
+### 17.1 Objetivo
+
+Evitar que el usuario tenga que volver a ingresar portales personalizados, cargos y funciones al iniciar una nueva sesión. Las preferencias deben guardarse en Supabase Radar 2.0 y quedar aisladas por cuenta. Esta mejora no modifica Radar 1 ni reutiliza sus tablas.
+
+### 17.2 Modelo de datos
+
+Se agregan exclusivamente dos tablas nuevas en el esquema `public`:
+
+**`user_search_portals`**
+- `id`: UUID, clave primaria.
+- `user_id`: UUID obligatorio, FK a `auth.users(id)`, borrado en cascada.
+- `name`: nombre visible del portal, entre 1 y 80 caracteres.
+- `url_template`: URL HTTP(S) pública, máximo 1.000 caracteres. Puede contener `{query}`; si no lo contiene, el conector añade el parámetro de búsqueda `q=`.
+- `enabled`: permite activar/desactivar el portal sin eliminarlo.
+- `created_at`, `updated_at`: marcas de tiempo.
+
+La URL se valida en la aplicación antes de consultarse. El conector debe seguir bloqueando redirecciones y destinos privados/no públicos; guardar una URL no implica que el sitio sea compatible con extracción HTML genérica.
+
+**`user_search_terms`**
+- `id`: UUID, clave primaria.
+- `user_id`: UUID obligatorio, FK a `auth.users(id)), borrado en cascada.
+- `term_type`: solo `cargo` o `funcion`.
+- `term`: texto de 2 a 160 caracteres.
+- `normalized_term`: columna generada para normalizar mayúsculas y espacios.
+- `enabled`: permite conservar y desactivar términos.
+- `created_at`, `updated_at`: marcas de tiempo.
+- Restricción única por usuario, tipo y término normalizado.
+
+### 17.3 Reglas funcionales
+
+| ID | Regla |
+|---|---|
+| RF-048 | Los portales personalizados se guardan en Supabase y se recuperan al iniciar sesión; no dependen de `st.session_state`. |
+| RF-049 | El usuario puede crear, activar, desactivar y eliminar portales propios. Solo los habilitados se incluyen por defecto en la selección de búsqueda. |
+| RF-050 | Los cargos personalizados se guardan por usuario y se presentan separados de las funciones. Los cargos sugeridos y derivados del CV siguen disponibles. |
+| RF-051 | Las funciones/responsabilidades se gestionan como términos independientes de los cargos y pueden buscar avisos aunque su título no coincida literalmente. |
+| RF-052 | La búsqueda combina cargos y funciones seleccionados. En LinkedIn se agrupan en una consulta booleana; en las demás fuentes se consulta cada término por separado. |
+| RF-053 | Los términos personalizados seleccionados se guardan al iniciar la búsqueda y se recuperan en sesiones posteriores. El usuario puede eliminarlos. |
+| RF-054 | Las preferencias son privadas por cuenta. Un usuario no puede leer, crear, actualizar ni eliminar las preferencias de otro usuario. |
+| RF-055 | Los portales y términos predeterminados siguen disponibles aunque falle la carga de preferencias guardadas; el error se informa y no bloquea el acceso a la aplicación. |
+
+### 17.4 Interfaz
+
+- Expansor «Administrar portales personalizados»: formulario para nombre y URL; listado persistente; acciones Activar/Desactivar y Eliminar.
+- Selector «Cargos objetivo»: incluye cargos predeterminados, cargos detectados en el CV y cargos propios guardados; permite escribir nuevos.
+- Selector «Funciones y responsabilidades»: lista independiente con funciones sugeridas y personalizadas; permite escribir nuevas.
+- Expansor «Administrar cargos y funciones guardados»: permite revisar y eliminar términos personalizados.
+- Las funciones sugeridas no quedan todas seleccionadas automáticamente para evitar multiplicar consultas y consumir cuota; el usuario elige cuáles incorporar.
+- Los portales personalizados habilitados se incorporan a la búsqueda y pueden desmarcarse en el selector general de fuentes.
+
+### 17.5 Seguridad y privacidad
+
+- RLS habilitado en ambas tablas.
+- Políticas SELECT, INSERT, UPDATE y DELETE restringidas a `TO authenticated` y `(select auth.uid()) = user_id`.
+- UPDATE exige tanto `USING` como `WITH CHECK`.
+- Permisos de tabla concedidos solo a `authenticated`; no se concede acceso a `anon`.
+- No se almacena información del CV ni credenciales de portales en estas tablas.
+- La aplicación usa la sesión autenticada de Supabase; no introduce ni expone `service_role`.
+
+### 17.6 Pruebas de aceptación
+
+| ID prueba | Escenario | Resultado esperado |
+|---|---|---|
+| QA-058 | Guardar portal y cerrar/reabrir sesión | El portal sigue disponible para el mismo usuario. |
+| QA-059 | Desactivar un portal guardado | Permanece almacenado, pero no se incluye por defecto en la búsqueda. |
+| QA-060 | Guardar cargo y función personalizados | Ambos reaparecen en sus selectores respectivos al volver a iniciar sesión. |
+| QA-061 | Buscar solo por funciones | Se ejecutan consultas por las funciones seleccionadas sin exigir un cargo. |
+| QA-062 | Usuario A intenta leer/modificar preferencias de B | RLS impide el acceso. |
+| QA-063 | Duplicar un término con mayúsculas distintas | No se crea un término duplicado para el mismo usuario y tipo. |
+| QA-064 | Fallo al cargar preferencias | La aplicación informa el problema y conserva los selectores predeterminados. |
+| QA-065 | Seleccionar cargos y funciones en LinkedIn | Se envía una única consulta agrupada; no se crea una consulta por cada término. |
+
+### 17.7 Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión autorizada | Estado |
+|---|---|---|---|---|
+| CHG-2026-010 | 2026-11-25 | RF-048–RF-055, QA-058–QA-065 | El propietario autoriza crear tablas nuevas y políticas RLS en Supabase Radar 2.0 para persistir portales, cargos y funciones; Radar 1 y tablas existentes quedan fuera de alcance. | Esquema aplicado y verificado; integración de interfaz/código en rama de trabajo, pendiente CI y despliegue. |
