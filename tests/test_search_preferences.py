@@ -78,3 +78,11 @@ def test_search_terms_are_saved_per_user_and_deduplicated_case_insensitively():
 def test_search_terms_reject_unknown_type():
     with pytest.raises(ValueError, match="Tipo de término"):
         save_search_terms(Client(), user_id="u1", term_type="empresa", terms=["x"])
+
+
+def test_custom_portal_rejects_non_http_urls():
+    with pytest.raises(ValueError, match="http:// o https://"):
+        save_search_portal(
+            Client(), user_id="u1", name="Portal",
+            url_template="file:///etc/passwd",
+        )
