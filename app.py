@@ -334,21 +334,74 @@ st.warning(
     "Se descartan avisos con fecha verificable superior a 14 días; los portales que no informan fecha se identifican por separado."
 )
 
+# Los portales agregados se mantienen durante la sesión de trabajo de Streamlit.
+st.session_state.setdefault("radar_custom_sources", [])
+custom_sources = st.session_state.radar_custom_sources
+
+with st.expander("＋ Agregar un portal o buscador de empleo", expanded=False):
+    st.caption(
+        "Agregue la URL pública de resultados del portal. Puede usar {query} en el lugar "
+        "donde debe insertarse el cargo; si no lo incluye, Radar agregará el parámetro ?q=."
+    )
+    with st.form("radar_add_custom_portal", clear_on_submit=True):
+        custom_portal_name = st.text_input("Nombre del portal", placeholder="Ej.: Portal de empleos de una minera")
+        custom_portal_url = st.text_input(
+            "URL de búsqueda del portal",
+            placeholder="https://sitio.cl/trabajos?buscar={query}",
+            help="Use la página pública de resultados, no la portada ni una URL que requiera iniciar sesión.",
+        )
+        add_custom_portal = st.form_submit_button("Agregar portal")
+    if add_custom_portal:
+        portal_name = custom_portal_name.strip()
+        portal_url = custom_portal_url.strip()
+        if not portal_name or not portal_url.startswith(("https://", "http://")):
+            st.error("Ingrese un nombre y una URL pública que comience con https:// o http://.")
+        elif any(item.get("url_template", "").rstrip("/") == portal_url.rstrip("/") for item in custom_sources):
+            st.warning("Ese portal ya está agregado.")
+        else:
+            portal_id = f"custom_portal_{len(custom_sources) + 1}"
+            custom_sources.append({
+                "id": portal_id,
+                "name": portal_name[:80],
+                "url_template": portal_url[:1000],
+            })
+            st.session_state.radar_custom_sources = custom_sources
+            st.success(f"Portal «{portal_name}» agregado. Quedará seleccionado para la búsqueda.")
+            st.rerun()
+
+if custom_sources:
+    st.caption("Portales personalizados agregados en esta sesión:")
+    for portal in list(custom_sources):
+        portal_col, remove_col = st.columns([5, 1])
+        portal_col.write(f"**{portal['name']}**")
+        portal_col.caption(portal["url_template"])
+        if remove_col.button("Quitar", key=f"remove_{portal['id']}"):
+            st.session_state.radar_custom_sources = [
+                item for item in st.session_state.radar_custom_sources
+                if item.get("id") != portal["id"]
+            ]
+            st.rerun()
+
 source_labels = {key: label for key, (label, _) in SOURCE_REGISTRY.items()}
+source_labels.update({item["id"]: item["name"] for item in custom_sources})
+source_options = list(SOURCE_REGISTRY) + [item["id"] for item in custom_sources]
 selected_sources = st.multiselect(
     "Portales y buscadores",
-    options=list(SOURCE_REGISTRY),
-    default=DEFAULT_SOURCES,
+    options=source_options,
+    default=DEFAULT_SOURCES + [item["id"] for item in custom_sources],
     format_func=lambda value: source_labels[value],
+    help="Seleccione los portales donde desea buscar. Puede agregar sitios propios arriba.",
 )
 generated_roles = derived_profile.get("roles", [])
 role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES))
 default_roles = generated_roles or DEFAULT_TARGET_ROLES
 selected_roles = st.multiselect(
-    "Cargos y funciones para buscar (derivados del CV + objetivos adicionales)",
+    "Cargos y funciones para buscar",
     options=role_options,
     default=default_roles,
-    help="Las familias derivadas amplían la búsqueda; los cargos objetivo anteriores siguen disponibles como señales adicionales.",
+    accept_new_options=True,
+    placeholder="Seleccione cargos o escriba uno nuevo y presione Enter",
+    help="Puede seleccionar cargos sugeridos o escribir cualquier cargo nuevo (por ejemplo, Analista de Contratos Minería). Los cargos agregados se usarán en esta búsqueda.",
 )
 role_context = [
     {
@@ -441,6 +494,7 @@ if run_pipeline:
         sources=selected_sources,
         limit_per_query=limit_per_query,
         role_context=role_context,
+        custom_sources=custom_sources,
     )
 
 @st.fragment(run_every="1s")
@@ -670,6 +724,7 @@ def render_search_task():
                 sources=selected_sources,
                 limit_per_query=limit_per_query,
                 role_context=role_context,
+                custom_sources=custom_sources,
             )
             st.rerun()
         if action_cols[1].button(
