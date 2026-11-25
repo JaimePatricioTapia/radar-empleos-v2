@@ -36,8 +36,8 @@ El score_match mide compatibilidad profesional demostrable, no similitud de voca
 Reglas de calibración:
 - 90–100: correspondencia muy alta y evidencia sólida en funciones y requisitos centrales.
 - 85–89: buena correspondencia, con brechas menores y evidencia clara en los requisitos centrales.
-- 80–84: compatibilidad parcial; no alcanza el umbral de recomendación del Radar.
-- 0–79: compatibilidad insuficiente; no debe considerarse una recomendación.
+- 70–84: banda de revisión manual; no recomendar automáticamente ni descartar sin revisión.
+- 0–69: afinidad baja; conservar la evaluación y permitir revisión, porque el puntaje aún no está calibrado con un benchmark humano.
 - Si la función principal es de otra especialidad, limita el puntaje a 60 aunque la industria coincida.
 - Si es práctica profesional, internship o trainee, limita el puntaje a 40.
 - Si faltan datos esenciales de la oferta, reduce la certeza y no infles el puntaje.
