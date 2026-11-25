@@ -7,7 +7,14 @@ from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
 from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
-from src.db.search_preferences import (load_search_preferences, save_search_portal, set_search_portal_enabled, delete_search_portal, save_search_terms, delete_search_term)
+from src.db.search_preferences import (
+    load_search_preferences,
+    save_search_portal,
+    set_search_portal_enabled,
+    delete_search_portal,
+    save_search_terms,
+    delete_search_term,
+)
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, DEFAULT_TARGET_FUNCTIONS
 from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_SCORE, classify_sector
 from src.search.task_runner import start_search_task
