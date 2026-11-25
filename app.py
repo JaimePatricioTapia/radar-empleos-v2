@@ -15,6 +15,167 @@ from src.search.role_families import derive_role_families
 from src.cv.skills_profile import derive_skills_profile
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+
+    :root {
+        --radar-ink: #17263c;
+        --radar-muted: #617086;
+        --radar-primary: #2457c5;
+        --radar-primary-dark: #1b4399;
+        --radar-teal: #087f8c;
+        --radar-bg: #f5f7fb;
+        --radar-surface: #ffffff;
+        --radar-border: #e3e9f2;
+        --radar-success: #147d55;
+        --radar-warning: #a86408;
+        --radar-danger: #b43b45;
+    }
+
+    html, body, [class*="css"], [data-testid="stAppViewContainer"] {
+        font-family: 'DM Sans', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--radar-ink);
+    }
+    [data-testid="stAppViewContainer"] {
+        background: var(--radar-bg);
+    }
+    [data-testid="stHeader"] {
+        background: rgba(245, 247, 251, 0.92);
+    }
+    [data-testid="stMainBlockContainer"] {
+        max-width: 1440px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+    h1, h2, h3, h4 {
+        font-family: 'Manrope', 'DM Sans', 'Segoe UI', sans-serif !important;
+        color: var(--radar-ink) !important;
+        letter-spacing: -0.035em;
+        line-height: 1.2;
+    }
+    h1 { font-size: clamp(1.9rem, 3vw, 2.45rem) !important; font-weight: 800 !important; }
+    h2 { font-size: 1.65rem !important; font-weight: 750 !important; }
+    h3 { font-size: 1.25rem !important; font-weight: 700 !important; }
+    p, li, label, .stMarkdown, .stCaption {
+        line-height: 1.58;
+    }
+    [data-testid="stCaptionContainer"], .stCaption {
+        color: var(--radar-muted) !important;
+        font-size: 0.84rem;
+    }
+    [data-testid="stSidebar"] {
+        background: #eef3fa;
+        border-right: 1px solid var(--radar-border);
+    }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+        color: #34445c;
+    }
+    [data-testid="stMetric"] {
+        background: var(--radar-surface);
+        border: 1px solid var(--radar-border);
+        border-radius: 14px;
+        padding: 1rem 1.1rem;
+        box-shadow: 0 2px 8px rgba(23, 38, 60, 0.035);
+    }
+    [data-testid="stMetricLabel"] {
+        color: var(--radar-muted) !important;
+        font-weight: 600;
+    }
+    [data-testid="stMetricValue"] {
+        color: var(--radar-ink) !important;
+        font-family: 'Manrope', 'DM Sans', sans-serif;
+        font-weight: 800;
+    }
+    [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] div[data-testid="stAlert"] {
+        border-radius: 12px;
+        border-width: 1px;
+    }
+    div.stButton > button, div.stFormSubmitButton > button, [data-testid="stLinkButton"] a {
+        border-radius: 10px;
+        min-height: 2.65rem;
+        font-weight: 650;
+        letter-spacing: 0.005em;
+        transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    div.stButton > button[kind="primary"], div.stFormSubmitButton > button[kind="primary"] {
+        background: var(--radar-primary);
+        border-color: var(--radar-primary);
+        color: #ffffff;
+    }
+    div.stButton > button[kind="primary"]:hover, div.stFormSubmitButton > button[kind="primary"]:hover {
+        background: var(--radar-primary-dark);
+        border-color: var(--radar-primary-dark);
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+    div.stButton > button:not([kind="primary"]):hover, div.stFormSubmitButton > button:not([kind="primary"]):hover {
+        border-color: #9aafd2;
+        color: var(--radar-primary-dark);
+    }
+    [data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea,
+    [data-testid="stNumberInput"] input, [data-testid="stSelectbox"] div[data-baseweb="select"],
+    [data-testid="stMultiSelect"] div[data-baseweb="select"] {
+        border-radius: 9px;
+    }
+    [data-testid="stTextInput"] input:focus, [data-testid="stTextArea"] textarea:focus {
+        border-color: var(--radar-primary);
+        box-shadow: 0 0 0 1px var(--radar-primary);
+    }
+    [data-testid="stExpander"] {
+        background: var(--radar-surface);
+        border: 1px solid var(--radar-border);
+        border-radius: 12px;
+        overflow: hidden;
+    }
+    [data-testid="stExpander"] summary {
+        font-weight: 650;
+        color: #263852;
+    }
+    [data-testid="stTabs"] button {
+        font-weight: 650;
+        color: var(--radar-muted);
+    }
+    [data-testid="stTabs"] button[aria-selected="true"] {
+        color: var(--radar-primary);
+    }
+    [data-testid="stProgress"] > div > div {
+        background: var(--radar-primary);
+        border-radius: 99px;
+    }
+    hr {
+        border-color: var(--radar-border);
+        margin-top: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+    a {
+        color: var(--radar-primary);
+        font-weight: 600;
+    }
+    a:hover {
+        color: var(--radar-primary-dark);
+    }
+    @media (max-width: 768px) {
+        [data-testid="stMainBlockContainer"] {
+            padding: 1rem 1rem 2rem;
+        }
+        h1 { font-size: 1.8rem !important; }
+        h2 { font-size: 1.4rem !important; }
+        [data-testid="stMetric"] { padding: 0.8rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+            transition-duration: 0.01ms !important;
+            animation-duration: 0.01ms !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Radar de Empleos 2.0")
 st.caption("Buscador multifuente y evaluador inteligente · Entorno independiente de desarrollo")
 
