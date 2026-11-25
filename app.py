@@ -12,6 +12,7 @@ from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
 from src.search.role_families import derive_role_families
+from src.cv.skills_profile import derive_skills_profile
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
 st.title("Radar de Empleos 2.0")
@@ -84,6 +85,8 @@ with st.sidebar:
 
 # Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
 derived_profile = {"families": [], "roles": [], "evidence_count": 0}
+active_cv_version = []
+derived_skills_profile = {"skills": [], "skill_count": 0, "categories": {}}
 try:
     active_cv_version = (
         client.table("cv_versions").select("id")
@@ -91,14 +94,31 @@ try:
     )
     if active_cv_version:
         cv_evidence = (
-            client.table("cv_chunks").select("content")
+            client.table("cv_chunks").select("chunk_id,section,content")
             .eq("user_id", user["id"])
             .eq("cv_version_id", active_cv_version[0]["id"])
             .limit(500).execute().data or []
         )
         derived_profile = derive_role_families(cv_evidence)
+        derived_skills_profile = derive_skills_profile(cv_evidence)
 except Exception as exc:
     st.warning(f"No se pudo derivar el perfil de cargos desde el CV: {type(exc).__name__}. Se conservarán los cargos objetivo manuales.")
+
+if derived_skills_profile.get("skills"):
+    with st.expander(f"Competencias detectadas con evidencia · {derived_skills_profile['skill_count']}", expanded=False):
+        st.caption("Inventario inicial extraído del texto del CV. No presume años ni dominio: los niveles solo aparecen cuando están declarados explícitamente. Revise las evidencias antes de postular.")
+        for category, count in derived_skills_profile.get("categories", {}).items():
+            st.markdown(f"**{category} · {count} competencias**")
+            for skill in [item for item in derived_skills_profile["skills"] if item["category"] == category]:
+                level = skill.get("proficiency")
+                level_label = level if level != "no_declarado" else "nivel no declarado"
+                st.markdown(f"- **{skill['name']}** · {level_label}")
+                for evidence in skill.get("evidence", [])[:2]:
+                    st.caption(f"{evidence['section']} · {evidence['excerpt']}")
+        for limitation in derived_skills_profile.get("limitations", []):
+            st.caption(f"Nota: {limitation}")
+elif active_cv_version:
+    st.info("No se detectaron competencias en el texto extraído. Revise que el CV esté correctamente procesado.")
 
 st.subheader("Mi currículum")
 st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")

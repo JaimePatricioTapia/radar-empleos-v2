@@ -11,6 +11,7 @@ from src.db.repository import save_evaluation
 from src.evaluation.evaluator import evaluate_offer, GeminiEvaluationDeferred
 from src.search.job_chunker import chunk_job_description
 from src.search.salary import analyse_salary, attractiveness_score
+from src.cv.skills_profile import derive_skills_profile
 
 logger = logging.getLogger(__name__)
 
@@ -359,6 +360,10 @@ def evaluate_top_offers(
     if not cv_rows:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
+    cv_chunk_rows = (client.table("cv_chunks").select("chunk_id,section,content")
+                     .eq("user_id", user_id).eq("cv_version_id", cv_version["id"])
+                     .limit(500).execute().data or [])
+    skills_profile = derive_skills_profile(cv_chunk_rows)
     ranked = client.rpc("rank_job_offers_by_cv", {
         "match_limit": max(1, min(int(top_k), daily_remaining, daily_evaluation_limit))
     }).execute().data or []
@@ -454,7 +459,8 @@ def evaluate_top_offers(
                  "filename": cv_version.get("source_filename"),
                  "page_count": cv_version.get("page_count"),
                  "char_count": cv_version.get("char_count"),
-                 "target_strategy": TARGET_STRATEGY},
+                 "target_strategy": TARGET_STRATEGY,
+                 "skills_profile": skills_profile},
                 evidence,
             )
             evaluation = run["evaluation"]
