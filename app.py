@@ -373,6 +373,15 @@ def render_search_task():
                 st.warning("Búsqueda detenida a solicitud. Las ofertas recopiladas se procesaron automáticamente.")
             elif result.get("completed"):
                 st.success("Búsqueda, preparación y evaluación finalizadas.")
+            elif evaluation.get("api_quota_paused"):
+                retry_seconds = evaluation.get("retry_after_seconds")
+                retry_note = (f" Google indicó esperar {int(retry_seconds):,} segundos antes de reintentar.".replace(",", ".")
+                              if retry_seconds else "")
+                st.warning(
+                    "La evaluación quedó pausada por el límite temporal de Gemini. "
+                    "Las evaluaciones ya guardadas se conservaron y las ofertas pendientes "
+                    "se pueden retomar con una nueva ejecución." + retry_note
+                )
             elif result.get("paused_for_api_quota"):
                 st.warning("La preparación quedó pausada por el límite temporal de Gemini. Los lotes guardados se conservaron.")
             elif result.get("paused_for_free_quota"):

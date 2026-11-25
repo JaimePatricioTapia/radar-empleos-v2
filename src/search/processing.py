@@ -8,7 +8,7 @@ from typing import Any, Callable
 from src.config import get_settings
 from src.cv.embeddings import embed_texts
 from src.db.repository import save_evaluation
-from src.evaluation.evaluator import evaluate_offer
+from src.evaluation.evaluator import evaluate_offer, GeminiEvaluationDeferred
 from src.search.job_chunker import chunk_job_description
 
 logger = logging.getLogger(__name__)
@@ -376,7 +376,8 @@ def evaluate_top_offers(
              "skipped_existing": 0, "skipped_excluded": 0,
              "errors": [ranking_diagnostic] if ranking_diagnostic else [],
              "results": [], "budget_exhausted": False,
-             "budget_remaining": daily_remaining}
+             "budget_remaining": daily_remaining, "api_quota_paused": False,
+             "api_quota_message": None, "retry_after_seconds": None}
     def notify_evaluation(processed: int) -> None:
         if on_progress:
             on_progress({
@@ -487,6 +488,13 @@ def evaluate_top_offers(
                 "verdict": evaluation["verdict"],
                 "semantic_similarity": candidate.get("semantic_score"),
             })
+        except GeminiEvaluationDeferred as exc:
+            stats["api_quota_paused"] = True
+            stats["api_quota_message"] = str(exc)
+            stats["retry_after_seconds"] = exc.retry_after_seconds
+            logger.warning("Evaluación pausada por cuota Gemini: %s", exc)
+            notify_evaluation(candidate_index)
+            break
         except Exception as exc:
             logger.exception("Falló evaluación de oferta %s", offer_id)
             stats["errors"].append(f"{offer.get('title')}: {type(exc).__name__}: {exc}")

@@ -191,3 +191,38 @@ def test_pipeline_emits_ordered_stage_events_and_processes_partial_discovery():
     assert result["stopped_early"] is True
     assert result["completed"] is False
     assert result["evaluation"]["evaluated"] == 2
+
+
+
+def test_full_pipeline_pauses_when_evaluation_quota_requests_long_wait():
+    client = _Client()
+    with (
+        patch.object(pipeline, "get_settings", return_value=SimpleNamespace(
+            max_daily_job_chunks=1000, max_daily_evaluations=100
+        )),
+        patch.object(pipeline, "run_discovery", return_value={
+            "total_found": 1, "saved": 1, "errors": 0,
+            "by_source": {}, "error_details": [],
+        }),
+        patch.object(pipeline, "get_processing_status", side_effect=[
+            {"pending_chunking": 0, "daily_chunk_budget_remaining": 1000},
+            {"pending_chunking": 0, "daily_chunk_budget_remaining": 1000},
+        ]),
+        patch.object(pipeline, "evaluate_top_offers", return_value={
+            "ranked": 10, "evaluated": 0, "below_threshold": 0,
+            "skipped_existing": 0, "skipped_excluded": 0,
+            "errors": [], "results": [], "budget_exhausted": False,
+            "budget_remaining": 100, "api_quota_paused": True,
+            "api_quota_message": "Gemini solicitó esperar 22239 segundos.",
+            "retry_after_seconds": 22239.0,
+        }),
+    ):
+        result = pipeline.run_full_search_pipeline(
+            client, user_id="user-1",
+            roles=["Business Analyst"], sources=["linkedin"],
+        )
+
+    assert result["paused_for_api_quota"] is True
+    assert result["completed"] is False
+    assert result["evaluation"]["api_quota_paused"] is True
+    assert result["evaluation"]["retry_after_seconds"] == 22239.0

@@ -34,3 +34,14 @@
 - Los topes siguen siendo configurables mediante RADAR_MAX_DAILY_JOB_CHUNKS y RADAR_MAX_DAILY_EVALUATIONS en entorno/Streamlit Secrets.
 - Esta modificación no aumenta cuotas de Google, no habilita facturación, no modifica Supabase y no altera datos ni credenciales.
 - El aumento no garantiza que se procesen 1.000 fragmentos: la cuota efectiva del modelo y el presupuesto de facturación del proyecto siguen aplicando.
+
+
+## 2026-11-24 — Pausa no bloqueante ante retryDelay extenso de Gemini (CHG-2026-009)
+
+- El registro real de Streamlit mostró un reintento de evaluación programado a 22.239 segundos (aprox. 6 h 10 min), provocado por un 429/RESOURCE_EXHAUSTED de Gemini.
+- Se identifica que el evaluador esperaba dentro del hilo de trabajo respetando literalmente retryDelay, bloqueando el cierre de la ejecución.
+- Se incorpora una excepción de pausa explícita cuando el retryDelay supera 60 segundos. No se duerme durante horas ni se hacen reintentos automáticos durante una cuota probablemente agotada.
+- La evaluación ya guardada permanece intacta; las ofertas aún no evaluadas permanecen pendientes para una nueva ejecución. El resultado informa pausa por cuota y segundos indicados por el proveedor.
+- Los reintentos breves (hasta 60 s) conservan el comportamiento acotado existente.
+- BNE timeout, Codelco HTTP 403 y Finning HTTP 429 son fallas aisladas por portal. No se evaden bloqueos; se mantiene la continuidad con otras fuentes y el cortacircuito por errores consecutivos.
+- No se modifican Supabase, esquema/RLS, datos, credenciales, topes, facturación ni cuotas de Google.
