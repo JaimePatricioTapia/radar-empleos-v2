@@ -420,7 +420,7 @@ selected_roles = st.multiselect(
     help="Puede combinar cargos sugeridos, detectados en su CV y términos propios guardados.",
 )
 function_options = list(dict.fromkeys(DEFAULT_TARGET_FUNCTIONS + saved_functions))
-default_functions = list(dict.fromkeys(DEFAULT_TARGET_FUNCTIONS + saved_functions))
+default_functions = list(dict.fromkeys(saved_functions))
 selected_functions = st.multiselect(
     "Funciones y responsabilidades",
     options=function_options,
