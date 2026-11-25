@@ -15,6 +15,21 @@ logger = logging.getLogger(__name__)
 MAX_PUBLICATION_AGE_DAYS = 14
 MAX_CONSECUTIVE_SOURCE_ERRORS = 2
 
+DEFAULT_TARGET_FUNCTIONS = [
+    "Levantamiento y análisis de requerimientos",
+    "Gestión y seguimiento de proyectos TI",
+    "Control y seguimiento de KPI",
+    "Mejora continua y optimización de procesos",
+    "Gestión de riesgos tecnológicos y ciberseguridad",
+    "Implementación y actualización de sistemas",
+    "Continuidad operacional y coordinación de operaciones",
+    "Gestión de proveedores y contratos",
+    "Análisis de datos y elaboración de reportes",
+    "Transformación digital y automatización",
+    "Gestión de backlog y priorización de requerimientos",
+]
+
+
 DEFAULT_TARGET_ROLES = [
     "Business Analyst Minería",
     "Business Analyst Senior TI",
@@ -97,15 +112,17 @@ def _stable_hash(offer: dict) -> str:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
-def _queries_for_source(source: str, roles: list[str]) -> list[tuple[str, str]]:
-    """Reduce LinkedIn a una sola consulta booleana para evitar ráfagas repetidas."""
+def _queries_for_source(source: str, roles: list[str], functions: list[str] | None = None) -> list[tuple[str, str]]:
+    """Combina cargos y funciones; LinkedIn conserva una única consulta agrupada."""
+    terms = list(dict.fromkeys([*roles, *(functions or [])]))
     if source == "linkedin":
-        grouped = " OR ".join(f'"{role}"' for role in roles)
-        return [(f"({grouped})", "cargos objetivo agrupados")]
-    return [(role, role) for role in roles]
+        grouped = " OR ".join(f'"{term}"' for term in terms)
+        return [(f"({grouped})", "cargos y funciones agrupados")]
+    return [(term, term) for term in terms]
 
 
 def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
+                  functions: list[str] | None = None,
                   limit_per_query: int = 12,
                   progress: Callable[[str], None] | None = None,
                   on_progress: Callable[[dict], None] | None = None,
@@ -115,7 +132,9 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                   should_stop: Callable[[], bool] | None = None,
                   max_age_days: int = MAX_PUBLICATION_AGE_DAYS) -> dict:
     """Descubre y guarda avisos sin evaluar con Gemini."""
-    roles = [re.sub(r"\s+", " ", role).strip() for role in roles if role.strip()]
+    roles = [re.sub(r"\s+", " ", role).strip() for role in roles if role and role.strip()]
+    functions = [re.sub(r"\s+", " ", item).strip() for item in (functions or []) if item and item.strip()]
+    search_terms = list(dict.fromkeys([*roles, *functions]))
     sources = list(dict.fromkeys(sources))
     custom_by_id = {
         str(item.get("id")): item for item in (custom_sources or [])
@@ -124,10 +143,10 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
     unknown = sorted(set(sources) - set(SOURCE_REGISTRY) - set(custom_by_id))
     if unknown:
         raise ValueError(f"Fuentes no reconocidas: {', '.join(unknown)}")
-    if not roles or not sources:
-        raise ValueError("Seleccione al menos un cargo y un portal.")
+    if not search_terms or not sources:
+        raise ValueError("Seleccione al menos un cargo o función y un portal.")
     limit_per_query = max(1, min(int(limit_per_query), 30))
-    planned_queries = sum(len(_queries_for_source(source, roles)) for source in sources)
+    planned_queries = sum(len(_queries_for_source(source, roles, functions)) for source in sources)
     stats = {"queries": planned_queries, "queries_completed": 0, "queries_skipped": 0, "stopped_early": False,
              "total_found": 0, "saved": 0, "duplicates": 0, "stale_skipped": 0,
              "irrelevant_skipped": 0, "filtered_examples": [],
@@ -156,7 +175,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
             label, connector_name = SOURCE_REGISTRY[source]
             connector = CONNECTORS[connector_name]
         source_stats = {"found": 0, "saved": 0, "duplicates": 0, "irrelevant_skipped": 0, "errors": 0}
-        source_queries = _queries_for_source(source, roles)
+        source_queries = _queries_for_source(source, roles, functions)
         consecutive_errors = 0
         for query_index, (query, query_label) in enumerate(source_queries):
             if should_stop and should_stop():
@@ -202,13 +221,12 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                 })
             try:
                 query_limit = (
-                    max(limit_per_query, min(limit_per_query * len(roles), 25))
+                    max(limit_per_query, min(limit_per_query * len(search_terms), 25))
                     if source == "linkedin" else limit_per_query
                 )
-                # Consultar el cargo tal como está definido. Agregar términos
-                # de dominio con AND implícito estrechaba demasiado la búsqueda
-                # y excluía ofertas equivalentes; los domain_terms se conservan
-                # como metadatos de trazabilidad, no como filtros de consulta.
+                # Consultar cada cargo o función tal como está definido.
+                # Agregar términos de dominio con AND implícito estrechaba
+                # demasiado la búsqueda y excluía ofertas equivalentes.
                 connector_query = query
                 offers = connector(connector_query, limit=query_limit)
                 consecutive_errors = 0
@@ -235,18 +253,18 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     else:
                         family = role_lookup.get(str(query_label).strip().casefold())
                         matched_families = [family] if family else []
-                    if matched_families:
-                        metadata = dict(offer.get("raw_metadata") or {})
-                        metadata["search_origin"] = {
-                            "families": [
-                                {"id": item.get("family_id"), "name": item.get("family_name"),
-                                 "priority": item.get("priority")}
-                                for item in matched_families
-                            ],
-                            "query": query_label,
-                            "domain_terms": (family_for_query or {}).get("domain_terms", []) if source != "linkedin" else [],
-                        }
-                        offer["raw_metadata"] = metadata
+                    metadata = dict(offer.get("raw_metadata") or {})
+                    metadata["search_origin"] = {
+                        "families": [
+                            {"id": item.get("family_id"), "name": item.get("family_name"),
+                             "priority": item.get("priority")}
+                            for item in matched_families
+                        ],
+                        "query": query_label,
+                        "query_type": "funcion" if query_label in functions else ("cargo_y_funcion" if source == "linkedin" and functions else "cargo"),
+                        "domain_terms": (family_for_query or {}).get("domain_terms", []) if source != "linkedin" else [],
+                    }
+                    offer["raw_metadata"] = metadata
                     published = _parse_published_at(offer.get("published_at"))
                     offer["published_at"] = published
                     if published:

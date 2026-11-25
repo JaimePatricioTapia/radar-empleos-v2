@@ -7,7 +7,15 @@ from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
 from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
-from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
+from src.db.search_preferences import (
+    load_search_preferences,
+    save_search_portal,
+    set_search_portal_enabled,
+    delete_search_portal,
+    save_search_terms,
+    delete_search_term,
+)
+from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, DEFAULT_TARGET_FUNCTIONS
 from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_SCORE, classify_sector
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
@@ -244,6 +252,14 @@ if st.session_state.radar_user is None:
     st.stop()
 
 user = st.session_state.radar_user
+try:
+    search_preferences = load_search_preferences(client, user_id=user["id"])
+except Exception as exc:
+    search_preferences = {"portals": [], "terms": []}
+    st.warning(
+        f"No se pudieron cargar sus preferencias guardadas: {type(exc).__name__}. "
+        "Los valores predeterminados siguen disponibles."
+    )
 with st.sidebar:
     st.success("Sesión iniciada")
     st.caption(user.get("email") or "Usuario autenticado")
@@ -334,53 +350,57 @@ st.warning(
     "Se descartan avisos con fecha verificable superior a 14 días; los portales que no informan fecha se identifican por separado."
 )
 
-# Los portales agregados se mantienen durante la sesión de trabajo de Streamlit.
-st.session_state.setdefault("radar_custom_sources", [])
-custom_sources = st.session_state.radar_custom_sources
+# Portales personalizados persistidos en Supabase y aislados por RLS.
+portal_rows = search_preferences.get("portals", [])
+custom_sources = [
+    {
+        "id": f"custom_portal_{row['id']}",
+        "name": row["name"],
+        "url_template": row["url_template"],
+    }
+    for row in portal_rows if row.get("enabled", True)
+]
 
-with st.expander("＋ Agregar un portal o buscador de empleo", expanded=False):
+with st.expander("＋ Administrar portales personalizados", expanded=False):
     st.caption(
-        "Agregue la URL pública de resultados del portal. Puede usar {query} en el lugar "
-        "donde debe insertarse el cargo; si no lo incluye, Radar agregará el parámetro ?q=."
+        "Los portales quedan guardados en su cuenta y estarán disponibles en futuras sesiones. "
+        "Use una URL pública de resultados; puede insertar {query} donde deba ir el término."
     )
     with st.form("radar_add_custom_portal", clear_on_submit=True):
         custom_portal_name = st.text_input("Nombre del portal", placeholder="Ej.: Portal de empleos de una minera")
         custom_portal_url = st.text_input(
             "URL de búsqueda del portal",
             placeholder="https://sitio.cl/trabajos?buscar={query}",
-            help="Use la página pública de resultados, no la portada ni una URL que requiera iniciar sesión.",
+            help="Use resultados públicos; no se admite una página que requiera iniciar sesión.",
         )
-        add_custom_portal = st.form_submit_button("Agregar portal")
+        add_custom_portal = st.form_submit_button("Guardar portal")
     if add_custom_portal:
-        portal_name = custom_portal_name.strip()
-        portal_url = custom_portal_url.strip()
-        if not portal_name or not portal_url.startswith(("https://", "http://")):
-            st.error("Ingrese un nombre y una URL pública que comience con https:// o http://.")
-        elif any(item.get("url_template", "").rstrip("/") == portal_url.rstrip("/") for item in custom_sources):
-            st.warning("Ese portal ya está agregado.")
-        else:
-            portal_id = f"custom_portal_{len(custom_sources) + 1}"
-            custom_sources.append({
-                "id": portal_id,
-                "name": portal_name[:80],
-                "url_template": portal_url[:1000],
-            })
-            st.session_state.radar_custom_sources = custom_sources
-            st.success(f"Portal «{portal_name}» agregado. Quedará seleccionado para la búsqueda.")
+        try:
+            save_search_portal(
+                client, user_id=user["id"], name=custom_portal_name,
+                url_template=custom_portal_url,
+            )
+            st.success("Portal guardado en su cuenta.")
             st.rerun()
-
-if custom_sources:
-    st.caption("Portales personalizados agregados en esta sesión:")
-    for portal in list(custom_sources):
-        portal_col, remove_col = st.columns([5, 1])
-        portal_col.write(f"**{portal['name']}**")
-        portal_col.caption(portal["url_template"])
-        if remove_col.button("Quitar", key=f"remove_{portal['id']}"):
-            st.session_state.radar_custom_sources = [
-                item for item in st.session_state.radar_custom_sources
-                if item.get("id") != portal["id"]
-            ]
-            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo guardar el portal: {type(exc).__name__}: {exc}")
+    if portal_rows:
+        for portal in portal_rows:
+            cols = st.columns([3, 5, 1, 1])
+            cols[0].write(f"**{portal['name']}**")
+            cols[1].caption(portal["url_template"])
+            action = "Desactivar" if portal.get("enabled", True) else "Activar"
+            if cols[2].button(action, key=f"toggle_portal_{portal['id']}"):
+                set_search_portal_enabled(
+                    client, user_id=user["id"], portal_id=portal["id"],
+                    enabled=not portal.get("enabled", True),
+                )
+                st.rerun()
+            if cols[3].button("Eliminar", key=f"delete_portal_{portal['id']}"):
+                delete_search_portal(client, user_id=user["id"], portal_id=portal["id"])
+                st.rerun()
+    else:
+        st.caption("Todavía no hay portales personalizados guardados.")
 
 source_labels = {key: label for key, (label, _) in SOURCE_REGISTRY.items()}
 source_labels.update({item["id"]: item["name"] for item in custom_sources})
@@ -392,17 +412,41 @@ selected_sources = st.multiselect(
     format_func=lambda value: source_labels[value],
     help="Seleccione los portales donde desea buscar. Puede agregar sitios propios arriba.",
 )
+saved_terms = [item for item in search_preferences.get("terms", []) if item.get("enabled", True)]
+saved_roles = [item["term"] for item in saved_terms if item.get("term_type") == "cargo"]
+saved_functions = [item["term"] for item in saved_terms if item.get("term_type") == "funcion"]
 generated_roles = derived_profile.get("roles", [])
-role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES))
-default_roles = generated_roles or DEFAULT_TARGET_ROLES
+role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES + saved_roles))
+default_roles = list(dict.fromkeys((generated_roles or DEFAULT_TARGET_ROLES) + saved_roles))
 selected_roles = st.multiselect(
-    "Cargos y funciones para buscar",
+    "Cargos objetivo",
     options=role_options,
     default=default_roles,
     accept_new_options=True,
-    placeholder="Seleccione cargos o escriba uno nuevo y presione Enter",
-    help="Puede seleccionar cargos sugeridos o escribir cualquier cargo nuevo (por ejemplo, Analista de Contratos Minería). Los cargos agregados se usarán en esta búsqueda.",
+    placeholder="Seleccione o escriba cargos y presione Enter",
+    help="Puede combinar cargos sugeridos, detectados en su CV y términos propios guardados.",
 )
+function_options = list(dict.fromkeys(DEFAULT_TARGET_FUNCTIONS + saved_functions))
+default_functions = list(dict.fromkeys(saved_functions))
+selected_functions = st.multiselect(
+    "Funciones y responsabilidades",
+    options=function_options,
+    default=default_functions,
+    accept_new_options=True,
+    placeholder="Ej.: continuidad operacional, control de KPI, levantamiento de requisitos",
+    help="Busca por actividades concretas aunque el aviso use un nombre de cargo diferente.",
+)
+with st.expander("Administrar cargos y funciones guardados", expanded=False):
+    if saved_terms:
+        for term in saved_terms:
+            cols = st.columns([2, 4, 1])
+            cols[0].caption("Cargo" if term["term_type"] == "cargo" else "Función")
+            cols[1].write(term["term"])
+            if cols[2].button("Eliminar", key=f"delete_term_{term['id']}"):
+                delete_search_term(client, user_id=user["id"], term_id=term["id"])
+                st.rerun()
+    else:
+        st.caption("Los términos personalizados se guardarán al ejecutar una búsqueda.")
 role_context = [
     {
         "family_id": family["id"],
@@ -422,13 +466,14 @@ limit_per_query = st.slider(
     value=15,
     step=5,
 )
+search_term_count = len(list(dict.fromkeys([*selected_roles, *selected_functions])))
 estimated_queries = sum(
-    1 if source == "linkedin" else len(selected_roles)
+    1 if source == "linkedin" else search_term_count
     for source in selected_sources
 )
 st.caption(
     f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda. "
-    "LinkedIn agrupa los cargos en una sola consulta para reducir bloqueos por ráfagas."
+    "LinkedIn agrupa cargos y funciones en una sola consulta para reducir bloqueos por ráfagas."
 )
 if derived_profile.get("families"):
     with st.expander("Familias funcionales detectadas en su CV", expanded=True):
@@ -483,14 +528,27 @@ if search_already_running:
 run_pipeline = st.button(
     "🚀 Buscar y evaluar ofertas automáticamente",
     type="primary",
-    disabled=not selected_sources or not selected_roles or not active_cv or search_already_running,
+    disabled=not selected_sources or not (selected_roles or selected_functions) or not active_cv or search_already_running,
     use_container_width=True,
 )
 if run_pipeline:
+    try:
+        save_search_terms(
+            client, user_id=user["id"], term_type="cargo",
+            terms=[term for term in selected_roles if term not in DEFAULT_TARGET_ROLES],
+        )
+        save_search_terms(
+            client, user_id=user["id"], term_type="funcion",
+            terms=[term for term in selected_functions if term not in DEFAULT_TARGET_FUNCTIONS],
+        )
+    except Exception as exc:
+        st.error(f"No se pudieron guardar los términos personalizados: {type(exc).__name__}: {exc}")
+        st.stop()
     st.session_state.radar_search_task = start_search_task(
         client,
         user_id=user["id"],
         roles=selected_roles,
+        functions=selected_functions,
         sources=selected_sources,
         limit_per_query=limit_per_query,
         role_context=role_context,
