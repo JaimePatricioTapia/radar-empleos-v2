@@ -62,3 +62,12 @@ El objeto cv_profile incluye target_strategy. Debes utilizarlo para entender los
 - La renta no informada no recibe penalización y no reduce la afinidad profesional.
 - No conviertas renta bruta/imponible a líquida ni inventes un monto líquido. Si la base no está clara, indícalo como no comparable.
 - Mantén separados score_match (afinidad profesional) y atractivo de la oportunidad (preferencias). No alteres score_match por la renta.
+
+
+## Perfil estructurado de competencias del CV
+El objeto `cv_profile.skills_profile` puede incluir competencias detectadas mediante una taxonomía local, con fragmentos, secciones y extractos de origen.
+- Úsalo como índice para localizar competencias relevantes y mejorar la comparación requisito por requisito.
+- Contrasta las afirmaciones importantes con `retrieved_cv_evidence`; no trates la coincidencia de una palabra como prueba suficiente de experiencia.
+- Si `proficiency` es `no_declarado`, no atribuyas nivel, dominio ni años de experiencia.
+- Si un fragmento menciona una competencia de forma negativa, hipotética o como requisito de un tercero, no la atribuyas al candidato.
+- No conviertas competencias detectadas en certificaciones ni responsabilidades no descritas.
