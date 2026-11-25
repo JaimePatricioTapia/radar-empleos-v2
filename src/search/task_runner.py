@@ -88,7 +88,7 @@ class SearchTask:
                     progress=emit_message,
                     on_progress=emit_progress,
                     on_offer=emit_offer,
-                    should_stop=self.stop_event.is_set,
+                    should_stop=lambda: self.stop_event.is_set() or self.cancel_event.is_set(),
                     should_cancel=self.cancel_event.is_set,
                 )
             except Exception as exc:  # el trabajo confirmado permanece en Supabase
