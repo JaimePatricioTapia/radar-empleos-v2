@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 from src.db.repository import upsert_job_offer
-from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url
+from src.search.sources import CONNECTORS, SOURCE_REGISTRY, canonical_job_url, search_custom_portal
 from src.search.relevance import assess_offer_relevance
 
 logger = logging.getLogger(__name__)
@@ -111,12 +111,17 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                   on_progress: Callable[[dict], None] | None = None,
                   on_offer: Callable[[dict], None] | None = None,
                   role_context: list[dict] | None = None,
+                  custom_sources: list[dict] | None = None,
                   should_stop: Callable[[], bool] | None = None,
                   max_age_days: int = MAX_PUBLICATION_AGE_DAYS) -> dict:
     """Descubre y guarda avisos sin evaluar con Gemini."""
     roles = [re.sub(r"\s+", " ", role).strip() for role in roles if role.strip()]
     sources = list(dict.fromkeys(sources))
-    unknown = sorted(set(sources) - set(SOURCE_REGISTRY))
+    custom_by_id = {
+        str(item.get("id")): item for item in (custom_sources or [])
+        if item.get("id") and item.get("url_template")
+    }
+    unknown = sorted(set(sources) - set(SOURCE_REGISTRY) - set(custom_by_id))
     if unknown:
         raise ValueError(f"Fuentes no reconocidas: {', '.join(unknown)}")
     if not roles or not sources:
@@ -141,8 +146,15 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
 
     seen = set()
     for source in sources:
-        label, connector_name = SOURCE_REGISTRY[source]
-        connector = CONNECTORS[connector_name]
+        if source in custom_by_id:
+            portal = custom_by_id[source]
+            label = str(portal.get("name") or "Portal personalizado")
+            connector = lambda query, limit=limit_per_query, portal=portal: search_custom_portal(
+                query, portal=portal, limit=limit
+            )
+        else:
+            label, connector_name = SOURCE_REGISTRY[source]
+            connector = CONNECTORS[connector_name]
         source_stats = {"found": 0, "saved": 0, "duplicates": 0, "irrelevant_skipped": 0, "errors": 0}
         source_queries = _queries_for_source(source, roles)
         consecutive_errors = 0
