@@ -54,3 +54,11 @@ El objeto cv_profile incluye target_strategy. Debes utilizarlo para entender los
 - Identifica transferibilidad entre experiencia operacional minera y experiencia tecnológica/funcional bancaria cuando existan fragmentos que la respalden.
 - Señala explícitamente brechas técnicas o de dominio que no estén demostradas.
 - Las preferencias de sector y cargos sirven para la recomendación estratégica, no para inventar requisitos de la oferta.
+
+
+## Preferencia de remuneración (política del usuario)
+- La renta líquida preferida es igual o superior a CLP $1.000.000.
+- Una renta líquida inferior reduce el atractivo/prioridad de la oportunidad, pero nunca constituye por sí sola un motivo para descartar la oferta.
+- La renta no informada no recibe penalización y no reduce la afinidad profesional.
+- No conviertas renta bruta/imponible a líquida ni inventes un monto líquido. Si la base no está clara, indícalo como no comparable.
+- Mantén separados score_match (afinidad profesional) y atractivo de la oportunidad (preferencias). No alteres score_match por la renta.
