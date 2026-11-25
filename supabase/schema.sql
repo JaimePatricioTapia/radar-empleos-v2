@@ -447,5 +447,9 @@ create policy "Users update own search terms" on public.user_search_terms
 create policy "Users delete own search terms" on public.user_search_terms
     for delete to authenticated using ((select auth.uid()) = user_id);
 
+revoke all privileges on table public.user_search_portals from anon;
+revoke all privileges on table public.user_search_terms from anon;
+revoke references, trigger, truncate on table public.user_search_portals from authenticated;
+revoke references, trigger, truncate on table public.user_search_terms from authenticated;
 grant select, insert, update, delete on public.user_search_portals to authenticated;
 grant select, insert, update, delete on public.user_search_terms to authenticated;
