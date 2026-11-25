@@ -157,6 +157,17 @@ st.markdown(
     a:hover {
         color: var(--radar-primary-dark);
     }
+    /* Foco visible para navegación por teclado y controles deshabilitados. */
+    button:focus-visible, a:focus-visible, input:focus-visible,
+    textarea:focus-visible, [role="combobox"]:focus-visible {
+        outline: 3px solid rgba(36, 87, 197, 0.38);
+        outline-offset: 2px;
+    }
+    div.stButton > button:disabled,
+    div.stFormSubmitButton > button:disabled {
+        opacity: 0.58;
+        cursor: not-allowed;
+    }
     @media (max-width: 768px) {
         [data-testid="stMainBlockContainer"] {
             padding: 1rem 1rem 2rem;
