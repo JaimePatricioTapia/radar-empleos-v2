@@ -31,7 +31,9 @@ El esquema fue aplicado al proyecto independiente Radar Empleos 2.0 y verificado
 - `job_offers`: texto y metadatos de ofertas.
 - `job_chunks`: fragmentos/embeddings de ofertas.
 - `evaluations`: veredicto, score, salida JSON, modelo, prompt y evidencia.
-- `applications`: seguimiento del proceso de postulación.\n- `user_search_portals`: portales personalizados persistentes por usuario.\n- `user_search_terms`: cargos y funciones personalizados por usuario.
+- `applications`: seguimiento del proceso de postulación.
+- `user_search_portals`: portales personalizados persistentes por usuario.
+- `user_search_terms`: cargos y funciones personalizados por usuario.
 
 Los embeddings se generan con el mismo modelo y dimensión para consultas y documentos. El vector se almacena como `vector(3072)`; HNSW indexa una expresión `halfvec(3072)` para respetar el límite de dimensiones del índice.
 
