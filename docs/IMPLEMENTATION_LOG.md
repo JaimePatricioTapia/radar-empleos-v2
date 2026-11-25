@@ -55,3 +55,13 @@
 - LinkedIn conserva la descarga de descripciones desactivada y, ante bloqueos 403/429, no insiste con otra ubicación.
 - Se mantienen los 14 días, la deduplicación, el filtro de pertinencia, la autenticación y el esquema actual de Supabase.
 - Validación pendiente de CI y de una búsqueda real desde Streamlit; las fuentes externas pueden seguir limitando solicitudes.
+
+
+## 2026-11-25 — Recuperación del estado de búsqueda y cancelación segura (PR siguiente)
+
+- El filtro sectorial de la bandeja se aclara como filtro de visualización: no cambia los cargos ni inicia una búsqueda.
+- Si el objeto de ejecución conserva un estado activo pero su hilo ya terminó, la interfaz recupera el estado y evita dejar deshabilitado el botón indefinidamente.
+- Se agrega cancelación cooperativa del pipeline desde cualquier etapa; espera a que termine la llamada externa actual y luego detiene nuevas consultas/evaluaciones.
+- La cancelación conserva en Supabase las ofertas, fragmentos y evaluaciones ya confirmados; no elimina ni modifica datos persistidos.
+- Se mantiene la acción existente para detener solo el descubrimiento y procesar lo recopilado.
+- No se modifican Supabase, RLS, secretos, credenciales ni facturación.
