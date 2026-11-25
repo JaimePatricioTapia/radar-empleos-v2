@@ -339,3 +339,30 @@ def test_source_circuit_breaker_skips_remaining_queries_after_two_consecutive_er
     assert result["queries_skipped"] == 1
     assert result["by_source"]["bne"]["skipped_queries"] == 1
     assert progress[-1]["status"] == "source_skipped"
+
+
+def test_functions_are_searched_as_independent_queries_and_grouped_for_linkedin():
+    roles = ["Business Analyst"]
+    functions = ["Levantamiento de requerimientos", "Continuidad operacional"]
+    linkedin = _queries_for_source("linkedin", roles, functions)
+    indeed = _queries_for_source("indeed", roles, functions)
+
+    assert len(linkedin) == 1
+    assert '"Business Analyst" OR "Levantamiento de requerimientos" OR "Continuidad operacional"' in linkedin[0][0]
+    assert len(indeed) == 3
+    assert [label for _, label in indeed] == roles + functions
+
+
+def test_discovery_can_search_only_by_functions(monkeypatch):
+    from src.search import ingestion
+
+    connector = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "getonbrd", connector)
+    result = ingestion.run_discovery(
+        client=object(), user_id="user-1", roles=[], functions=["Continuidad operacional"],
+        sources=["getonbrd"],
+    )
+    assert connector.call_count == 1
+    assert connector.call_args.args[0] == "Continuidad operacional"
+    assert result["queries"] == 1
+    assert result["errors"] == 0
