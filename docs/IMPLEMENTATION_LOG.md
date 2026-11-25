@@ -73,3 +73,11 @@
 - La cancelación conserva en Supabase las ofertas, fragmentos y evaluaciones ya confirmados; no elimina ni modifica datos persistidos.
 - Se mantiene la acción existente para detener solo el descubrimiento y procesar lo recopilado.
 - No se modifican Supabase, RLS, secretos, credenciales ni facturación.
+
+
+## 2026-11-25 — Perfil de competencias trazable para el MVP
+- Se incorpora una taxonomía de competencias por familias funcionales, datos, riesgo/seguridad, producto, métodos y minería.
+- Cada competencia detectada conserva sección, fragmento y extracto de respaldo del CV.
+- Los niveles básico/intermedio/avanzado/experto solo se muestran cuando están expresamente declarados cerca de la competencia.
+- El perfil se presenta en la interfaz y se entrega al evaluador junto con la evidencia recuperada.
+- No se infieren años de experiencia ni se modifican tablas, RLS, secretos o datos históricos.
