@@ -45,7 +45,7 @@ LEVEL_PATTERNS = [
     ("básico", re.compile(r"\b(basico|basica|nivel basico)\b")),
     ("intermedio", re.compile(r"\b(intermedio|intermedia|nivel intermedio)\b")),
     ("avanzado", re.compile(r"\b(avanzado|avanzada|nivel avanzado)\b")),
-    ("experto", re.compile(r"\b(experto|experta|especialista)\b")),
+    ("experto", re.compile(r"\b(experto|experta)\b")),
 ]
 
 
