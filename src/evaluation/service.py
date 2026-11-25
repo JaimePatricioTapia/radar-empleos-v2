@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 
+from src.search.salary import analyse_salary
+
 from src.config import get_settings
 from src.db.repository import upsert_job_offer, save_evaluation
 from src.evaluation.evaluator import evaluate_offer
@@ -126,6 +128,9 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
         },
         evidence,
     )
+    salary_analysis = analyse_salary(offer.get("salary_text"))
+    run["evaluation"]["salary_assessment"] = salary_analysis["label"]
+    run["evaluation"]["salary_preference"] = salary_analysis
     saved = save_evaluation(
         client,
         user_id=user_id,
