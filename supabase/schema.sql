@@ -390,3 +390,62 @@ revoke all on function public.set_job_offer_lifecycle_status(uuid, text, text) f
 grant execute on function public.rank_job_offers_by_cv(integer) to authenticated;
 grant execute on function public.retrieve_cv_evidence_for_offer(uuid, integer) to authenticated;
 grant execute on function public.set_job_offer_lifecycle_status(uuid, text, text) to authenticated;
+
+
+-- Preferencias persistentes de búsqueda, privadas por cuenta.
+create table public.user_search_portals (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    name text not null check (char_length(btrim(name)) between 1 and 80),
+    url_template text not null check (
+        char_length(btrim(url_template)) between 8 and 1000
+        and btrim(url_template) ~* '^https?://'
+    ),
+    enabled boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint user_search_portals_user_url_unique unique (user_id, url_template)
+);
+create index user_search_portals_user_enabled_idx
+    on public.user_search_portals (user_id, enabled, created_at);
+
+create table public.user_search_terms (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null references auth.users(id) on delete cascade,
+    term_type text not null check (term_type in ('cargo', 'funcion')),
+    term text not null check (char_length(btrim(term)) between 2 and 160),
+    normalized_term text generated always as (lower(btrim(term))) stored,
+    enabled boolean not null default true,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    constraint user_search_terms_user_type_term_unique
+        unique (user_id, term_type, normalized_term)
+);
+create index user_search_terms_user_type_enabled_idx
+    on public.user_search_terms (user_id, term_type, enabled, created_at);
+
+alter table public.user_search_portals enable row level security;
+alter table public.user_search_terms enable row level security;
+
+create policy "Users read own search portals" on public.user_search_portals
+    for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own search portals" on public.user_search_portals
+    for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users update own search portals" on public.user_search_portals
+    for update to authenticated using ((select auth.uid()) = user_id)
+    with check ((select auth.uid()) = user_id);
+create policy "Users delete own search portals" on public.user_search_portals
+    for delete to authenticated using ((select auth.uid()) = user_id);
+
+create policy "Users read own search terms" on public.user_search_terms
+    for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own search terms" on public.user_search_terms
+    for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users update own search terms" on public.user_search_terms
+    for update to authenticated using ((select auth.uid()) = user_id)
+    with check ((select auth.uid()) = user_id);
+create policy "Users delete own search terms" on public.user_search_terms
+    for delete to authenticated using ((select auth.uid()) = user_id);
+
+grant select, insert, update, delete on public.user_search_portals to authenticated;
+grant select, insert, update, delete on public.user_search_terms to authenticated;
