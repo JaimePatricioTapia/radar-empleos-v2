@@ -94,10 +94,29 @@ def test_indeed_searches_chile_and_antofagasta_and_fetches_descriptions(monkeypa
     assert offers[1]["raw_metadata"]["search_location"] == "Antofagasta, Chile"
 
 
-def test_glassdoor_is_registered_as_an_independent_jobspy_source():
+def test_glassdoor_is_registered_as_an_independent_jobspy_source(monkeypatch):
     from src.search.sources import CONNECTORS, SOURCE_REGISTRY
+
+    frame = SimpleNamespace(
+        attrs={},
+        empty=False,
+        to_dict=lambda orient: [{
+            "site": "glassdoor",
+            "title": "IT Business Analyst",
+            "job_url": "https://www.glassdoor.com/job-listing/123",
+            "company_name": "Empresa",
+            "description": "Requirements analysis and IT projects.",
+        }],
+    )
+    scrape = Mock(return_value=frame)
+    monkeypatch.setitem(sys.modules, "jobspy", SimpleNamespace(scrape_jobs=scrape))
+
+    offers = search_jobspy_site("IT Business Analyst", site="glassdoor")
+
     assert SOURCE_REGISTRY["glassdoor"][1] == "glassdoor"
-    assert callable(CONNECTORS["glassdoor"])
+    assert CONNECTORS["glassdoor"] is not None
+    assert len(offers) == 1
+    assert scrape.call_args.kwargs["fetch_description"] is True
 
 
 def test_jobspy_surfaces_source_errors_instead_of_silently_returning_empty(monkeypatch):
