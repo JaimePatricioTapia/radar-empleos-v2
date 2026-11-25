@@ -329,6 +329,7 @@ def build_job_chunks(
 def evaluate_top_offers(
     client: Any, *, user_id: str, top_k: int = 35,
     on_progress: Callable[[dict], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> dict:
     """Evalúa con Gemini solo el top semántico y ofertas aún no evaluadas con el CV activo."""
     settings = get_settings()
@@ -388,6 +389,9 @@ def evaluate_top_offers(
             })
 
     for candidate_index, candidate in enumerate(ranked, start=1):
+        if should_cancel and should_cancel():
+            stats["cancelled"] = True
+            break
         offer_id = candidate["job_offer_id"]
         previous = (client.table("evaluations").select("id")
                     .eq("user_id", user_id).eq("job_offer_id", offer_id)
