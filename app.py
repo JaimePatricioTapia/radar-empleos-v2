@@ -343,53 +343,57 @@ st.warning(
     "Se descartan avisos con fecha verificable superior a 14 días; los portales que no informan fecha se identifican por separado."
 )
 
-# Los portales agregados se mantienen durante la sesión de trabajo de Streamlit.
-st.session_state.setdefault("radar_custom_sources", [])
-custom_sources = st.session_state.radar_custom_sources
+# Portales personalizados persistidos en Supabase y aislados por RLS.
+portal_rows = search_preferences.get("portals", [])
+custom_sources = [
+    {
+        "id": f"custom_portal_{row['id']}",
+        "name": row["name"],
+        "url_template": row["url_template"],
+    }
+    for row in portal_rows if row.get("enabled", True)
+]
 
-with st.expander("＋ Agregar un portal o buscador de empleo", expanded=False):
+with st.expander("＋ Administrar portales personalizados", expanded=False):
     st.caption(
-        "Agregue la URL pública de resultados del portal. Puede usar {query} en el lugar "
-        "donde debe insertarse el cargo; si no lo incluye, Radar agregará el parámetro ?q=."
+        "Los portales quedan guardados en su cuenta y estarán disponibles en futuras sesiones. "
+        "Use una URL pública de resultados; puede insertar {query} donde deba ir el término."
     )
     with st.form("radar_add_custom_portal", clear_on_submit=True):
         custom_portal_name = st.text_input("Nombre del portal", placeholder="Ej.: Portal de empleos de una minera")
         custom_portal_url = st.text_input(
             "URL de búsqueda del portal",
             placeholder="https://sitio.cl/trabajos?buscar={query}",
-            help="Use la página pública de resultados, no la portada ni una URL que requiera iniciar sesión.",
+            help="Use resultados públicos; no se admite una página que requiera iniciar sesión.",
         )
-        add_custom_portal = st.form_submit_button("Agregar portal")
+        add_custom_portal = st.form_submit_button("Guardar portal")
     if add_custom_portal:
-        portal_name = custom_portal_name.strip()
-        portal_url = custom_portal_url.strip()
-        if not portal_name or not portal_url.startswith(("https://", "http://")):
-            st.error("Ingrese un nombre y una URL pública que comience con https:// o http://.")
-        elif any(item.get("url_template", "").rstrip("/") == portal_url.rstrip("/") for item in custom_sources):
-            st.warning("Ese portal ya está agregado.")
-        else:
-            portal_id = f"custom_portal_{len(custom_sources) + 1}"
-            custom_sources.append({
-                "id": portal_id,
-                "name": portal_name[:80],
-                "url_template": portal_url[:1000],
-            })
-            st.session_state.radar_custom_sources = custom_sources
-            st.success(f"Portal «{portal_name}» agregado. Quedará seleccionado para la búsqueda.")
+        try:
+            save_search_portal(
+                client, user_id=user["id"], name=custom_portal_name,
+                url_template=custom_portal_url,
+            )
+            st.success("Portal guardado en su cuenta.")
             st.rerun()
-
-if custom_sources:
-    st.caption("Portales personalizados agregados en esta sesión:")
-    for portal in list(custom_sources):
-        portal_col, remove_col = st.columns([5, 1])
-        portal_col.write(f"**{portal['name']}**")
-        portal_col.caption(portal["url_template"])
-        if remove_col.button("Quitar", key=f"remove_{portal['id']}"):
-            st.session_state.radar_custom_sources = [
-                item for item in st.session_state.radar_custom_sources
-                if item.get("id") != portal["id"]
-            ]
-            st.rerun()
+        except Exception as exc:
+            st.error(f"No se pudo guardar el portal: {type(exc).__name__}: {exc}")
+    if portal_rows:
+        for portal in portal_rows:
+            cols = st.columns([3, 5, 1, 1])
+            cols[0].write(f"**{portal['name']}**")
+            cols[1].caption(portal["url_template"])
+            action = "Desactivar" if portal.get("enabled", True) else "Activar"
+            if cols[2].button(action, key=f"toggle_portal_{portal['id']}"):
+                set_search_portal_enabled(
+                    client, user_id=user["id"], portal_id=portal["id"],
+                    enabled=not portal.get("enabled", True),
+                )
+                st.rerun()
+            if cols[3].button("Eliminar", key=f"delete_portal_{portal['id']}"):
+                delete_search_portal(client, user_id=user["id"], portal_id=portal["id"])
+                st.rerun()
+    else:
+        st.caption("Todavía no hay portales personalizados guardados.")
 
 source_labels = {key: label for key, (label, _) in SOURCE_REGISTRY.items()}
 source_labels.update({item["id"]: item["name"] for item in custom_sources})
