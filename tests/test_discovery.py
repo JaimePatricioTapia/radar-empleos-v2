@@ -156,6 +156,31 @@ def test_run_discovery_does_not_repeat_linkedin_for_each_selected_jobspy_source(
     assert result["errors"] == 0
 
 
+def test_domain_terms_do_not_narrow_the_actual_search_query(monkeypatch):
+    from src.search import ingestion
+
+    connector = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "getonbrd", connector)
+    family = {
+        "family_id": "business_analysis",
+        "family_name": "Análisis de negocio y procesos",
+        "priority": 1,
+        "titles": ["Business Analyst"],
+        "domain_terms": ["requerimientos", "historias de usuario", "procesos"],
+        "evidence": ["business analyst", "PBI"],
+    }
+
+    ingestion.run_discovery(
+        client=object(),
+        user_id="user-1",
+        roles=["Business Analyst"],
+        sources=["getonbrd"],
+        role_context=[family],
+    )
+
+    assert connector.call_args.args[0] == "Business Analyst"
+
+
 def test_linkedin_failure_does_not_stop_other_portals(monkeypatch):
     from src.search import ingestion
 
