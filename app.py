@@ -361,6 +361,12 @@ def render_search_task():
         if getattr(task, "latest_message", None):
             st.caption(task.latest_message)
     else:
+        # Inicializar el resultado antes de evaluar task.error: si el worker falla,
+        # la vista de resumen igualmente consulta result/preparation más abajo.
+        result = task.result or {}
+        discovery = result.get("discovery", {})
+        preparation = result.get("preparation", {})
+        evaluation = result.get("evaluation", {})
         if task.error:
             st.error(f"No se pudo completar el proceso: {task.error}")
             st.info("Las ofertas y los lotes confirmados permanecen guardados. Puede volver a ejecutar el botón; Radar reutilizará el trabajo ya persistido.")
