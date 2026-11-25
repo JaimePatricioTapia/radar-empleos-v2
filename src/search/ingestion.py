@@ -31,7 +31,7 @@ DEFAULT_TARGET_ROLES = [
     "Especialista Tecnología Operacional Minera",
 ]
 DEFAULT_SOURCES = [
-    "linkedin", "indeed", "chiletrabajos", "computrabajo",
+    "linkedin", "indeed", "glassdoor", "chiletrabajos", "computrabajo",
     "contutalento", "bne", "codelco", "finning", "getonbrd",
 ]
 
@@ -193,10 +193,11 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     max(limit_per_query, min(limit_per_query * len(roles), 25))
                     if source == "linkedin" else limit_per_query
                 )
-                family_terms = (family_for_query or {}).get("domain_terms", [])
+                # Consultar el cargo tal como está definido. Agregar términos
+                # de dominio con AND implícito estrechaba demasiado la búsqueda
+                # y excluía ofertas equivalentes; los domain_terms se conservan
+                # como metadatos de trazabilidad, no como filtros de consulta.
                 connector_query = query
-                if source != "linkedin" and family_terms:
-                    connector_query = f"{query} {' '.join(family_terms[:2])}"
                 offers = connector(connector_query, limit=query_limit)
                 consecutive_errors = 0
                 for offer in offers:
