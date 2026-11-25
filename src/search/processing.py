@@ -457,22 +457,23 @@ def evaluate_top_offers(
                  "target_strategy": TARGET_STRATEGY},
                 evidence,
             )
+            evaluation = run["evaluation"]
+            affinity = int(evaluation["score_match"])
+            priority = _priority_score(affinity, sector)
+            salary_analysis = analyse_salary(offer.get("salary_text"))
+            opportunity_score = attractiveness_score(affinity, salary_analysis)
+            evaluation["salary_assessment"] = salary_analysis["label"]
+            evaluation["salary_preference"] = salary_analysis
             saved = save_evaluation(
                 client, user_id=user_id, offer_id=offer_id,
                 cv_version_id=cv_version["id"], run=run,
             )
-            evaluation = run["evaluation"]
-            affinity = int(evaluation["score_match"])
-            priority = _priority_score(affinity, sector)
             metadata = offer.get("raw_metadata") or {}
             metadata["semantic_preselection"] = {
                 "similarity": candidate.get("semantic_score"),
                 "matching_job_chunks": candidate.get("matching_job_chunk_count"),
                 "method": "rank_job_offers_by_cv"
             }
-            salary_analysis = analyse_salary(offer.get("salary_text"))
-            opportunity_score = attractiveness_score(affinity, salary_analysis)
-            evaluation["salary_assessment"] = salary_analysis["label"]
             metadata["evaluation"] = {
                 "evaluation_id": saved["id"], "model": run["model"],
                 "prompt_version": run["prompt_version"], "cv_version_id": cv_version["id"],
