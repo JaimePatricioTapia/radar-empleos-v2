@@ -475,7 +475,7 @@ La URL se valida en la aplicación antes de consultarse. El conector debe seguir
 
 **`user_search_terms`**
 - `id`: UUID, clave primaria.
-- `user_id`: UUID obligatorio, FK a `auth.users(id)), borrado en cascada.
+- `user_id`: UUID obligatorio, FK a `auth.users(id)`, borrado en cascada.
 - `term_type`: solo `cargo` o `funcion`.
 - `term`: texto de 2 a 160 caracteres.
 - `normalized_term`: columna generada para normalizar mayúsculas y espacios.
