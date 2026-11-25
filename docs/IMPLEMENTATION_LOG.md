@@ -55,3 +55,11 @@
 - LinkedIn conserva la descarga de descripciones desactivada y, ante bloqueos 403/429, no insiste con otra ubicación.
 - Se mantienen los 14 días, la deduplicación, el filtro de pertinencia, la autenticación y el esquema actual de Supabase.
 - Validación pendiente de CI y de una búsqueda real desde Streamlit; las fuentes externas pueden seguir limitando solicitudes.
+
+
+## 2026-11-25 — Pausa inmediata por cuota diaria Gemini (PR siguiente)
+
+- Se identifica explícitamente el error de cuota diaria Free Tier de generate_content y se interpreta el plazo de espera de Google (incluyendo formatos como 22h9m16s).
+- En lugar de consumir cuatro reintentos adicionales por cada oferta, se pausa inmediatamente la evaluación y se conservan las ofertas y evaluaciones ya persistidas.
+- Se agregan pruebas para parseo de espera, fallback de 24 horas y errores 503 no diarios.
+- No se modifican cuotas, facturación, credenciales, Supabase ni datos.
