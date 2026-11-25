@@ -103,54 +103,74 @@ def _request_get(url: str, **kwargs):
 
 def search_jobspy_site(query: str, *, site: str, limit: int = 15,
                        location: str = "Chile") -> list[dict]:
-    """Consulta un único portal JobSpy y no hace una petición extra por descripción.
+    """Consulta un portal JobSpy; Indeed se busca en Chile y Antofagasta.
 
-    Mantener cada portal aislado evita repetir LinkedIn cuando el orquestador
-    procesa Indeed y permite que un error de una fuente no oculte las demás.
+    Las descripciones se recuperan para Indeed/Glassdoor porque el filtro de
+    pertinencia necesita funciones y requisitos, no solo el título. LinkedIn
+    mantiene la descarga desactivada para reducir solicitudes sobre un portal
+    que ya aplica bloqueos.
     """
-    if site not in {"linkedin", "indeed"}:
+    if site not in {"linkedin", "indeed", "glassdoor"}:
         raise ValueError(f"Portal JobSpy no soportado: {site}")
 
     from jobspy import scrape_jobs
-    frame = scrape_jobs(
-        site_name=[site],
-        search_term=query,
-        location=location,
-        results_wanted=limit,
-        hours_old=336,
-        country_indeed="Chile",
-        fetch_description=False,
-        verbose=0,
-    )
-    if frame is None:
-        return []
 
-    attrs = getattr(frame, "attrs", {}) or {}
-    errors = attrs.get("errors", {}) or {}
-    if errors.get(site):
-        raise RuntimeError(f"JobSpy {site}: {errors[site]}")
-
-    if frame.empty:
-        return []
-
+    locations = [location, "Antofagasta, Chile"] if site == "indeed" and location == "Chile" else [location]
     results = []
-    for row in frame.to_dict(orient="records"):
-        source = str(row.get("site") or row.get("source") or site).lower()
-        offer = normalize_offer(
-            source=source,
-            title=row.get("title"),
-            url=row.get("job_url") or row.get("link"),
-            company=row.get("company_name") or row.get("company"),
-            location=row.get("location"),
-            description=row.get("description"),
-            published_at=str(row.get("date_posted") or "") or None,
-            employment_type=row.get("job_type"),
-            salary_text=row.get("min_amount") or row.get("salary"),
-            external_id=str(row.get("id") or ""),
-            raw_metadata={"via": "python-jobspy", "description_fetch_requested": False},
+    errors_seen = []
+    seen = set()
+    for search_location in dict.fromkeys(locations):
+        frame = scrape_jobs(
+            site_name=[site],
+            search_term=query,
+            location=search_location,
+            results_wanted=limit,
+            hours_old=336,
+            country_indeed="Chile",
+            fetch_description=site in {"indeed", "glassdoor"},
+            verbose=0,
         )
-        if offer:
-            results.append(offer)
+        if frame is None:
+            continue
+
+        attrs = getattr(frame, "attrs", {}) or {}
+        errors = attrs.get("errors", {}) or {}
+        if errors.get(site):
+            error = str(errors[site])
+            errors_seen.append(f"{search_location}: {error}")
+            # Un bloqueo explícito no se debe insistir desde la misma IP.
+            if "429" in error or "403" in error:
+                break
+            continue
+
+        if frame.empty:
+            continue
+
+        for row in frame.to_dict(orient="records"):
+            source = str(row.get("site") or row.get("source") or site).lower()
+            offer = normalize_offer(
+                source=source,
+                title=row.get("title"),
+                url=row.get("job_url") or row.get("link"),
+                company=row.get("company_name") or row.get("company"),
+                location=row.get("location") or search_location,
+                description=row.get("description"),
+                published_at=str(row.get("date_posted") or "") or None,
+                employment_type=row.get("job_type"),
+                salary_text=row.get("min_amount") or row.get("salary"),
+                external_id=str(row.get("id") or ""),
+                raw_metadata={
+                    "via": "python-jobspy",
+                    "description_fetch_requested": site in {"indeed", "glassdoor"},
+                    "search_location": search_location,
+                },
+            )
+            if offer and offer["job_hash"] not in seen:
+                seen.add(offer["job_hash"])
+                results.append(offer)
+
+    if errors_seen and not results:
+        raise RuntimeError(f"JobSpy {site}: {'; '.join(errors_seen)}")
     return results
 
 
@@ -160,9 +180,13 @@ def search_linkedin(query: str, limit: int = 15) -> list[dict]:
 
 
 def search_indeed(query: str, limit: int = 15) -> list[dict]:
-    """Busca ofertas de Indeed de forma independiente de LinkedIn."""
+    """Busca Indeed en Chile y refuerza la cobertura minera en Antofagasta."""
     return search_jobspy_site(query, site="indeed", limit=limit)
 
+
+def search_glassdoor(query: str, limit: int = 15) -> list[dict]:
+    """Busca ofertas públicas de Glassdoor mediante JobSpy."""
+    return search_jobspy_site(query, site="glassdoor", limit=limit)
 
 def search_getonbrd(query: str, limit: int = 15) -> list[dict]:
     response = _request_get("https://www.getonbrd.com/api/v0/search/jobs",
