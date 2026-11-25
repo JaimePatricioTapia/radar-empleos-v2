@@ -15,8 +15,77 @@ from src.search.role_families import derive_role_families
 from src.cv.skills_profile import derive_skills_profile
 
 st.set_page_config(page_title="Radar de Empleos 2.0", page_icon="🎯", layout="wide")
-st.title("Radar de Empleos 2.0")
-st.caption("Buscador multifuente y evaluador inteligente · Entorno independiente de desarrollo")
+
+# Sistema visual: jerarquía clara, contraste accesible y componentes consistentes.
+st.markdown("""
+<style>
+:root {
+  --radar-ink: #172B3A; --radar-muted: #647789; --radar-primary: #155E75;
+  --radar-primary-dark: #104B5E; --radar-accent: #0F766E;
+  --radar-bg: #F4F7FA; --radar-surface: #FFFFFF; --radar-border: #DCE5EC;
+}
+.stApp { background: var(--radar-bg); color: var(--radar-ink); }
+[data-testid="stHeader"] { background: rgba(244,247,250,.92); }
+.block-container { max-width: 1240px; padding-top: 2rem; padding-bottom: 3rem; }
+h1, h2, h3 { color: var(--radar-ink); letter-spacing: -.025em; }
+h1 { font-weight: 760; } h2, h3 { font-weight: 690; }
+p, label, [data-testid="stMarkdownContainer"] { color: var(--radar-ink); }
+small, [data-testid="stCaptionContainer"] { color: var(--radar-muted) !important; }
+[data-testid="stMetric"] {
+  background: var(--radar-surface); border: 1px solid var(--radar-border);
+  border-radius: 14px; padding: 14px 16px; box-shadow: 0 2px 8px rgba(23,43,58,.035);
+}
+[data-testid="stMetricLabel"] { color: var(--radar-muted); font-weight: 600; }
+[data-testid="stMetricValue"] { color: var(--radar-ink); font-weight: 750; }
+div[data-testid="stVerticalBlockBorderWrapper"] {
+  border-color: var(--radar-border); border-radius: 16px; background: var(--radar-surface);
+}
+.stButton > button, .stFormSubmitButton > button, [data-testid="stLinkButton"] > a {
+  border-radius: 10px; min-height: 2.65rem; font-weight: 650;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
+  background: var(--radar-primary); border-color: var(--radar-primary); color: #fff;
+}
+.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover {
+  background: var(--radar-primary-dark); border-color: var(--radar-primary-dark); color: #fff;
+}
+.stButton > button:hover { border-color: var(--radar-primary); color: var(--radar-primary); }
+[data-baseweb="input"] > div, [data-baseweb="select"] > div, [data-baseweb="textarea"] > div {
+  border-radius: 10px; border-color: #CBD7E1; background: #fff;
+}
+[data-baseweb="input"]:focus-within > div, [data-baseweb="select"]:focus-within > div,
+[data-baseweb="textarea"]:focus-within > div { border-color: var(--radar-primary); box-shadow: 0 0 0 1px var(--radar-primary); }
+[data-testid="stExpander"] {
+  border: 1px solid var(--radar-border); border-radius: 12px; background: rgba(255,255,255,.72);
+}
+[data-testid="stAlert"] { border-radius: 12px; }
+[data-testid="stProgressBar"] > div > div { background: var(--radar-accent); }
+[data-testid="stTabs"] button[role="tab"] { font-weight: 650; }
+section[data-testid="stSidebar"] { background: #EAF0F5; border-right: 1px solid var(--radar-border); }
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { color: var(--radar-ink); }
+.radar-hero {
+  padding: 1.45rem 1.7rem; margin: 0 0 1.6rem 0; border-radius: 18px;
+  color: #fff; background: linear-gradient(115deg, #123B50 0%, #155E75 58%, #0F766E 100%);
+  box-shadow: 0 10px 26px rgba(18,59,80,.14);
+}
+.radar-hero h1 { color: #fff !important; margin: 0 0 .25rem 0; font-size: 2rem; }
+.radar-hero p { color: #D9EAF0 !important; margin: 0; }
+.radar-kicker {
+  color: var(--radar-primary); font-size: .76rem; font-weight: 800;
+  letter-spacing: .09em; text-transform: uppercase; margin: .4rem 0 .35rem 0;
+}
+@media (max-width: 700px) {
+  .block-container { padding: 1rem 1rem 2rem 1rem; }
+  .radar-hero { padding: 1.15rem; border-radius: 14px; }
+  .radar-hero h1 { font-size: 1.55rem; }
+}
+</style>
+<div class="radar-hero">
+  <h1>Radar de Empleos 2.0</h1>
+  <p>Encuentre oportunidades, evalúe su afinidad y gestione sus postulaciones desde un solo lugar.</p>
+</div>
+""", unsafe_allow_html=True)
 
 settings = get_settings()
 if "supabase_client" not in st.session_state:
@@ -120,6 +189,7 @@ if derived_skills_profile.get("skills"):
 elif active_cv_version:
     st.info("No se detectaron competencias en el texto extraído. Revise que el CV esté correctamente procesado.")
 
+st.markdown('<div class="radar-kicker">01 · Perfil profesional</div>', unsafe_allow_html=True)
 st.subheader("Mi currículum")
 st.write("Cargue su CV en PDF. El archivo se procesa temporalmente en el servidor y se elimina al terminar; solo se guardan el texto extraído, sus fragmentos y embeddings, protegidos por su cuenta.")
 uploaded_cv = st.file_uploader("Seleccionar CV (PDF, máximo 15 MB)", type=["pdf"], key="cv_pdf_upload")
@@ -145,7 +215,8 @@ if st.button("Procesar mi CV", type="primary", disabled=uploaded_cv is None):
         except Exception as exc:
             st.error(f"No se pudo procesar el CV: {type(exc).__name__}: {exc}")
 st.divider()
-st.header("🔎 Búsqueda y evaluación automática")
+st.markdown('<div class="radar-kicker">02 · Descubrimiento</div>', unsafe_allow_html=True)
+st.header("Búsqueda y evaluación automática")
 st.write(
     "Una sola acción consulta los portales seleccionados, guarda las ofertas nuevas, "
     "prepara sus descripciones y embeddings, las compara con la evidencia de su CV "
@@ -512,7 +583,8 @@ if st.session_state.get("radar_search_task") is not None:
     render_search_task()
 
 st.divider()
-st.header("📌 Bandeja de oportunidades")
+st.markdown('<div class="radar-kicker">03 · Gestión de oportunidades</div>', unsafe_allow_html=True)
+st.header("Bandeja de oportunidades")
 st.caption(
     "La afinidad mide compatibilidad profesional; el atractivo ajusta esa afinidad según la preferencia de renta. "
     "Los rangos son provisionales y no equivalen a una probabilidad de contratación."
@@ -659,6 +731,7 @@ except Exception as exc:
     st.error(f"No se pudo cargar la bandeja: {exc}")
 
 st.divider()
+st.markdown('<div class="radar-kicker">04 · Herramienta complementaria</div>', unsafe_allow_html=True)
 st.subheader("Evaluar una oferta manualmente")
 st.write("Función complementaria: puede pegar un aviso que encontró por su cuenta. No reemplaza la búsqueda automática.")
 with st.form("evaluate_offer_form"):
