@@ -85,6 +85,7 @@ with st.sidebar:
 
 # Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
 derived_profile = {"families": [], "roles": [], "evidence_count": 0}
+active_cv_version = []
 derived_skills_profile = {"skills": [], "skill_count": 0, "categories": {}}
 try:
     active_cv_version = (
