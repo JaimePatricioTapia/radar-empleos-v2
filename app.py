@@ -405,17 +405,41 @@ selected_sources = st.multiselect(
     format_func=lambda value: source_labels[value],
     help="Seleccione los portales donde desea buscar. Puede agregar sitios propios arriba.",
 )
+saved_terms = [item for item in search_preferences.get("terms", []) if item.get("enabled", True)]
+saved_roles = [item["term"] for item in saved_terms if item.get("term_type") == "cargo"]
+saved_functions = [item["term"] for item in saved_terms if item.get("term_type") == "funcion"]
 generated_roles = derived_profile.get("roles", [])
-role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES))
-default_roles = generated_roles or DEFAULT_TARGET_ROLES
+role_options = list(dict.fromkeys(generated_roles + DEFAULT_TARGET_ROLES + saved_roles))
+default_roles = list(dict.fromkeys((generated_roles or DEFAULT_TARGET_ROLES) + saved_roles))
 selected_roles = st.multiselect(
-    "Cargos y funciones para buscar",
+    "Cargos objetivo",
     options=role_options,
     default=default_roles,
     accept_new_options=True,
-    placeholder="Seleccione cargos o escriba uno nuevo y presione Enter",
-    help="Puede seleccionar cargos sugeridos o escribir cualquier cargo nuevo (por ejemplo, Analista de Contratos Minería). Los cargos agregados se usarán en esta búsqueda.",
+    placeholder="Seleccione o escriba cargos y presione Enter",
+    help="Puede combinar cargos sugeridos, detectados en su CV y términos propios guardados.",
 )
+function_options = list(dict.fromkeys(DEFAULT_TARGET_FUNCTIONS + saved_functions))
+default_functions = list(dict.fromkeys(DEFAULT_TARGET_FUNCTIONS + saved_functions))
+selected_functions = st.multiselect(
+    "Funciones y responsabilidades",
+    options=function_options,
+    default=default_functions,
+    accept_new_options=True,
+    placeholder="Ej.: continuidad operacional, control de KPI, levantamiento de requisitos",
+    help="Busca por actividades concretas aunque el aviso use un nombre de cargo diferente.",
+)
+with st.expander("Administrar cargos y funciones guardados", expanded=False):
+    if saved_terms:
+        for term in saved_terms:
+            cols = st.columns([2, 4, 1])
+            cols[0].caption("Cargo" if term["term_type"] == "cargo" else "Función")
+            cols[1].write(term["term"])
+            if cols[2].button("Eliminar", key=f"delete_term_{term['id']}"):
+                delete_search_term(client, user_id=user["id"], term_id=term["id"])
+                st.rerun()
+    else:
+        st.caption("Los términos personalizados se guardarán al ejecutar una búsqueda.")
 role_context = [
     {
         "family_id": family["id"],
@@ -435,13 +459,14 @@ limit_per_query = st.slider(
     value=15,
     step=5,
 )
+search_term_count = len(list(dict.fromkeys([*selected_roles, *selected_functions])))
 estimated_queries = sum(
-    1 if source == "linkedin" else len(selected_roles)
+    1 if source == "linkedin" else search_term_count
     for source in selected_sources
 )
 st.caption(
     f"El barrido ejecutará hasta {estimated_queries} consultas de búsqueda. "
-    "LinkedIn agrupa los cargos en una sola consulta para reducir bloqueos por ráfagas."
+    "LinkedIn agrupa cargos y funciones en una sola consulta para reducir bloqueos por ráfagas."
 )
 if derived_profile.get("families"):
     with st.expander("Familias funcionales detectadas en su CV", expanded=True):
@@ -496,7 +521,7 @@ if search_already_running:
 run_pipeline = st.button(
     "🚀 Buscar y evaluar ofertas automáticamente",
     type="primary",
-    disabled=not selected_sources or not selected_roles or not active_cv or search_already_running,
+    disabled=not selected_sources or not (selected_roles or selected_functions) or not active_cv or search_already_running,
     use_container_width=True,
 )
 if run_pipeline:
