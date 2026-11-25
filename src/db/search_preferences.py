@@ -23,6 +23,8 @@ def save_search_portal(client: Any, *, user_id: str, name: str, url_template: st
     url_template = str(url_template).strip()[:1000]
     if not name:
         raise ValueError("Ingrese el nombre del portal.")
+    if len(url_template) < 8 or len(url_template) > 1000:
+        raise ValueError("La URL debe tener entre 8 y 1.000 caracteres.")
     if not url_template.startswith(("https://", "http://")):
         raise ValueError("La URL debe comenzar con http:// o https://.")
     existing = (
