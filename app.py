@@ -217,11 +217,23 @@ if not active_cv:
     st.warning("Antes de iniciar, procese su currículum en la sección «Mi currículum».")
 
 active_search_task = st.session_state.get("radar_search_task")
+# Recuperar el estado de interfaz si el hilo terminó inesperadamente sin alcanzar
+# el bloque finally (por ejemplo, reinicio del worker de Streamlit Cloud).
+if active_search_task is not None and not active_search_task.finished:
+    worker_thread = getattr(active_search_task, "thread", None)
+    if worker_thread is None or not worker_thread.is_alive():
+        active_search_task.finished = True
+        if active_search_task.result is None and not active_search_task.error:
+            active_search_task.error = (
+                "El proceso en segundo plano ya no está activo. "
+                "Puede iniciar una nueva búsqueda; los datos confirmados permanecen guardados."
+            )
 search_already_running = active_search_task is not None and not active_search_task.finished
 if search_already_running:
     st.info(
-        "La ejecución anterior todavía está activa. Para evitar dos procesos simultáneos, "
-        "la nueva búsqueda se habilitará cuando termine el procesamiento actual."
+        "Hay una ejecución anterior todavía activa. Cambiar el filtro sectorial solo modifica "
+        "la bandeja; no inicia otra búsqueda. Puede solicitar la detención segura del proceso "
+        "desde el panel de estado."
     )
 run_pipeline = st.button(
     "🚀 Buscar y evaluar ofertas automáticamente",
@@ -269,8 +281,20 @@ def render_search_task():
     stage_label = stage_names.get(stage, "Proceso integral")
     st.subheader("Estado de la búsqueda")
     if not task.finished:
+        if getattr(task, "cancel_requested", False):
+            st.info("Cancelación solicitada. Radar terminará la operación externa en curso y detendrá el pipeline sin descartar lo ya guardado.")
+        cancel_cols = st.columns([3, 2])
+        if not getattr(task, "cancel_requested", False) and cancel_cols[1].button(
+            "⏹ Cancelar proceso completo",
+            key="radar_cancel_pipeline",
+            type="secondary",
+            use_container_width=True,
+            help="Detiene el pipeline después de la consulta/API actual; conserva ofertas y fragmentos guardados.",
+        ):
+            task.request_cancel()
+            st.warning("Cancelación solicitada. No se iniciarán nuevas consultas ni evaluaciones; se conservarán los datos confirmados.")
         if task.stop_requested:
-            st.info("Detención solicitada. Radar terminará la consulta actual y continuará con preparación y evaluación.")
+            st.info("Detención de búsqueda solicitada. Se terminará el descubrimiento y se procesarán los resultados recopilados.")
         if event.get("last_updated_at"):
             st.caption(f"Última actualización real: {event['last_updated_at']}")
         if stage == "discovery":
@@ -375,7 +399,9 @@ def render_search_task():
             discovery = result.get("discovery", {})
             preparation = result.get("preparation", {})
             evaluation = result.get("evaluation", {})
-            if result.get("stopped_early"):
+            if result.get("cancelled"):
+                st.warning("Proceso cancelado a solicitud. Las ofertas, evaluaciones y fragmentos confirmados se conservaron; puede iniciar otra búsqueda.")
+            elif result.get("stopped_early"):
                 st.warning("Búsqueda detenida a solicitud. Las ofertas recopiladas se procesaron automáticamente.")
             elif result.get("completed"):
                 st.success("Búsqueda, preparación y evaluación finalizadas.")
@@ -469,7 +495,8 @@ st.divider()
 st.header("📌 Bandeja priorizada")
 st.caption(
     f"Solo se muestran ofertas NUEVAS con afinidad profesional igual o superior a "
-    f"{MINIMUM_AFFINITY_SCORE}%. El orden prioriza afinidad; el sector solo desempata."
+    f"{MINIMUM_AFFINITY_SCORE}%. El orden prioriza afinidad; el sector solo desempata. "
+    "El filtro siguiente solo cambia las ofertas visibles; no modifica ni repite la búsqueda."
 )
 sector_filter = st.selectbox(
     "Filtro sectorial",
