@@ -57,7 +57,7 @@ Protecciones incorporadas en la rama de optimización:
 - Embeddings en lotes; cada sublote exitoso se guarda inmediatamente en Supabase.
 - Reintentos limitados ante errores transitorios de Gemini, respetando el `retryDelay` del proveedor.
 - Reanudación por índice de fragmento: los embeddings ya guardados no se vuelven a calcular.
-- Topes preventivos internos de **250 fragmentos de ofertas** y **15 evaluaciones** por ventana móvil de 24 horas. Son límites conservadores del Radar, no una promesa de cuota oficial de Google.
+- Topes preventivos internos máximos de **250 fragmentos de ofertas** y **15 evaluaciones** por ventana móvil de 24 horas. Son límites conservadores del Radar, no una promesa de cuota oficial de Google. Los secretos pueden reducirlos, pero la aplicación no permite elevarlos por encima de esos máximos.
 - Al alcanzar el tope, la búsqueda se pausa sin borrar resultados ni seguir consumiendo cuota; quedan pendientes para una ejecución posterior.
 
 La evaluación del CV utiliza embeddings al procesarlo. No vuelva a cargar el mismo CV sin necesidad; primero verifique si ya está activo. La configuración de modelo y dimensiones debe mantenerse compatible con el esquema de Supabase (3072 dimensiones).
@@ -94,3 +94,7 @@ Se recomienda mantener los valores predeterminados hasta comprobar el consumo re
 - No permite solapar dos procesos de búsqueda.
 - Si el presupuesto de embeddings está agotado, advierte que la nueva búsqueda puede descubrir y guardar ofertas, pero no preparará sus embeddings hasta la renovación del límite móvil de 24 horas.
 - Las ofertas y fragmentos ya persistidos se conservan; no se borran al repetir la búsqueda.
+
+
+## MVP — guía de primera prueba
+Consulte [docs/MVP_TEST_GUIDE.md](docs/MVP_TEST_GUIDE.md). El MVP se considera apto para una prueba controlada cuando CI pasa y se valida manualmente el flujo autenticado de CV, búsqueda, evaluación, bandeja y estado de postulación. Los puntajes 85/70 son bandas provisionales, no calibradas con resultados de contratación.
