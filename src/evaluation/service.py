@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 
 from src.search.salary import analyse_salary
+from src.cv.skills_profile import derive_skills_profile
 
 from src.config import get_settings
 from src.db.repository import upsert_job_offer, save_evaluation
@@ -117,6 +118,10 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
         "job_hash": normalized["job_hash"],
         "description": compact_description,
     }
+    cv_chunk_rows = (client.table("cv_chunks").select("chunk_id,section,content")
+                     .eq("user_id", user_id).eq("cv_version_id", cv_version["id"])
+                     .limit(500).execute().data or [])
+    skills_profile = derive_skills_profile(cv_chunk_rows)
     run = evaluate_offer(
         evaluation_offer,
         {
@@ -125,6 +130,7 @@ def evaluate_job_offer(offer: dict, *, client, user_id: str) -> dict:
             "page_count": cv_version.get("page_count"),
             "char_count": cv_version.get("char_count"),
             "target_strategy": TARGET_STRATEGY,
+            "skills_profile": skills_profile,
         },
         evidence,
     )
