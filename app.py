@@ -7,7 +7,8 @@ from src.evaluation.service import evaluate_job_offer
 from src.config import get_settings
 from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
-from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
+from src.db.search_preferences import (load_search_preferences, save_search_portal, set_search_portal_enabled, delete_search_portal, save_search_terms, delete_search_term)
+from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, DEFAULT_TARGET_FUNCTIONS
 from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_SCORE, classify_sector
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
@@ -244,6 +245,14 @@ if st.session_state.radar_user is None:
     st.stop()
 
 user = st.session_state.radar_user
+try:
+    search_preferences = load_search_preferences(client, user_id=user["id"])
+except Exception as exc:
+    search_preferences = {"portals": [], "terms": []}
+    st.warning(
+        f"No se pudieron cargar sus preferencias guardadas: {type(exc).__name__}. "
+        "Los valores predeterminados siguen disponibles."
+    )
 with st.sidebar:
     st.success("Sesión iniciada")
     st.caption(user.get("email") or "Usuario autenticado")
