@@ -10,10 +10,13 @@ from src.cv.embeddings import embed_texts
 from src.db.repository import save_evaluation
 from src.evaluation.evaluator import evaluate_offer, GeminiEvaluationDeferred
 from src.search.job_chunker import chunk_job_description
+from src.search.salary import analyse_salary, attractiveness_score
 
 logger = logging.getLogger(__name__)
 
 MINIMUM_AFFINITY_SCORE = 85
+# Puntaje 70–84: revisión humana, no descarte automático. Umbrales provisionales.
+MANUAL_REVIEW_MINIMUM_SCORE = 70
 # Topes operativos temporales para medir la cuota real de Gemini; configurables en src/config.py.
 MAX_DAILY_JOB_CHUNKS = 1000
 MAX_DAILY_EVALUATIONS = 100
@@ -376,7 +379,7 @@ def evaluate_top_offers(
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
              "skipped_existing": 0, "skipped_excluded": 0,
              "errors": [ranking_diagnostic] if ranking_diagnostic else [],
-             "results": [], "budget_exhausted": False,
+             "results": [], "review_results": [], "budget_exhausted": False,
              "budget_remaining": daily_remaining, "api_quota_paused": False,
              "api_quota_message": None, "retry_after_seconds": None}
     def notify_evaluation(processed: int) -> None:
@@ -467,12 +470,17 @@ def evaluate_top_offers(
                 "matching_job_chunks": candidate.get("matching_job_chunk_count"),
                 "method": "rank_job_offers_by_cv"
             }
+            salary_analysis = analyse_salary(offer.get("salary_text"))
+            opportunity_score = attractiveness_score(affinity, salary_analysis)
+            evaluation["salary_assessment"] = salary_analysis["label"]
             metadata["evaluation"] = {
                 "evaluation_id": saved["id"], "model": run["model"],
                 "prompt_version": run["prompt_version"], "cv_version_id": cv_version["id"],
                 "strengths": evaluation.get("strengths", []),
                 "gaps": evaluation.get("gaps", []),
                 "role_detected": evaluation.get("role_detected"),
+                "salary_preference": salary_analysis,
+                "attractiveness_score": opportunity_score,
             }
             client.table("job_offers").update({
                 "affinity_score": affinity, "priority_score": priority,
@@ -481,15 +489,23 @@ def evaluate_top_offers(
             stats["evaluated"] += 1
             notify_evaluation(candidate_index)
             if not meets_affinity_threshold(affinity):
-                # Se conserva la evaluación para trazabilidad, pero no se presenta
-                # como recomendación ni vuelve a consumir Gemini.
+                # Se conserva para la bandeja de revisión; el umbral no elimina oportunidades.
                 stats["below_threshold"] += 1
+                if affinity >= MANUAL_REVIEW_MINIMUM_SCORE:
+                    stats.setdefault("review_results", []).append({
+                        "id": offer_id, "title": offer["title"], "company": offer.get("company"),
+                        "source_url": offer.get("source_url"), "affinity_score": affinity,
+                        "priority_score": priority, "attractiveness_score": opportunity_score,
+                        "salary_preference": salary_analysis,
+                        "sector_category": sector, "verdict": evaluation["verdict"],
+                    })
                 continue
             stats["results"].append({
                 "id": offer_id, "title": offer["title"], "company": offer.get("company"),
                 "source_url": offer.get("source_url"), "affinity_score": affinity,
-                "priority_score": priority, "sector_category": sector,
-                "verdict": evaluation["verdict"],
+                "priority_score": priority, "attractiveness_score": opportunity_score,
+                "salary_preference": salary_analysis,
+                "sector_category": sector, "verdict": evaluation["verdict"],
                 "semantic_similarity": candidate.get("semantic_score"),
             })
         except GeminiEvaluationDeferred as exc:
@@ -505,7 +521,11 @@ def evaluate_top_offers(
             notify_evaluation(candidate_index)
     # La compatibilidad profesional manda; el sector solo desempata.
     stats["results"].sort(
-        key=lambda item: (item["affinity_score"], item["priority_score"]),
+        key=lambda item: (item.get("attractiveness_score", item["affinity_score"]), item["affinity_score"], item["priority_score"]),
+        reverse=True,
+    )
+    stats["review_results"].sort(
+        key=lambda item: (item.get("attractiveness_score", item["affinity_score"]), item["affinity_score"]),
         reverse=True,
     )
     stats["budget_remaining"] = max(0, daily_remaining - stats["evaluated"])
