@@ -70,11 +70,19 @@ def _declared_level(text: str, term: str) -> str:
     position = normalized.find(needle)
     if position < 0:
         return "no_declarado"
-    context = normalized[max(0, position - 70): position + len(needle) + 70]
+    term_end = position + len(needle)
+    context_start = max(0, position - 24)
+    context_end = min(len(normalized), term_end + 24)
+    context = normalized[context_start:context_end]
+    candidates = []
     for label, pattern in LEVEL_PATTERNS:
-        if pattern.search(context):
-            return label
-    return "no_declarado"
+        for match in pattern.finditer(context):
+            absolute_start = context_start + match.start()
+            absolute_end = context_start + match.end()
+            distance = min(abs(absolute_start - term_end), abs(position - absolute_end))
+            if distance <= 22:
+                candidates.append((distance, label))
+    return min(candidates, default=(None, "no_declarado"))[1]
 
 
 def derive_skills_profile(chunks: list[dict] | list[str]) -> dict:
