@@ -615,18 +615,18 @@ try:
         return int(value if value is not None else item.get("affinity_score") or -1)
     inbox.sort(key=lambda item: (attractiveness(item), item.get("affinity_score") or -1, item.get("priority_score") or -1), reverse=True)
     recommended = [item for item in inbox if item.get("affinity_score") is not None and int(item["affinity_score"]) >= MINIMUM_AFFINITY_SCORE]
-    review = [item for item in inbox if item.get("affinity_score") is not None and 70 <= int(item["affinity_score"]) < MINIMUM_AFFINITY_SCORE]
-    lower = [item for item in inbox if item.get("affinity_score") is not None and int(item["affinity_score"]) < 70]
+    review = [item for item in inbox if item.get("affinity_score") is not None and MANUAL_REVIEW_MINIMUM_SCORE <= int(item["affinity_score"]) < MINIMUM_AFFINITY_SCORE]
+    lower = [item for item in inbox if item.get("affinity_score") is not None and int(item["affinity_score"]) < MANUAL_REVIEW_MINIMUM_SCORE]
     pending = [item for item in inbox if item.get("affinity_score") is None]
     st.subheader(f"Recomendadas · {len(recommended)}")
     st.caption(f"Afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%. Revisar evidencia antes de postular.")
     for item in recommended:
         render_offer_card(item, evaluation_by_offer.get(item["id"]))
     st.subheader(f"Revisión manual · {len(review)}")
-    st.caption("Afinidad entre 70% y 84%. No se descartan: revise requisitos, brechas y condiciones.")
+    st.caption(f"Afinidad entre {MANUAL_REVIEW_MINIMUM_SCORE}% y {MINIMUM_AFFINITY_SCORE - 1}%. No se descartan: revise requisitos, brechas y condiciones.")
     for item in review:
         render_offer_card(item, evaluation_by_offer.get(item["id"]))
-    with st.expander(f"Otras evaluadas bajo 70% · {len(lower)}"):
+    with st.expander(f"Otras evaluadas bajo {MANUAL_REVIEW_MINIMUM_SCORE}% · {len(lower)}"):
         st.caption("Se conservan visibles para que un puntaje no calibrado no elimine oportunidades automáticamente.")
         for item in lower:
             render_offer_card(item, evaluation_by_offer.get(item["id"]))
