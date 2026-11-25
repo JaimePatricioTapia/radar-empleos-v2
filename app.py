@@ -525,10 +525,23 @@ run_pipeline = st.button(
     use_container_width=True,
 )
 if run_pipeline:
+    try:
+        save_search_terms(
+            client, user_id=user["id"], term_type="cargo",
+            terms=[term for term in selected_roles if term not in DEFAULT_TARGET_ROLES],
+        )
+        save_search_terms(
+            client, user_id=user["id"], term_type="funcion",
+            terms=[term for term in selected_functions if term not in DEFAULT_TARGET_FUNCTIONS],
+        )
+    except Exception as exc:
+        st.error(f"No se pudieron guardar los términos personalizados: {type(exc).__name__}: {exc}")
+        st.stop()
     st.session_state.radar_search_task = start_search_task(
         client,
         user_id=user["id"],
         roles=selected_roles,
+        functions=selected_functions,
         sources=selected_sources,
         limit_per_query=limit_per_query,
         role_context=role_context,
