@@ -26,6 +26,7 @@ def run_full_search_pipeline(
     on_progress: Callable[[dict], None] | None = None,
     on_offer: Callable[[dict], None] | None = None,
     should_stop: Callable[[], bool] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     chunk_batch_size: int = 100,
     evaluation_batch_size: int = 1000,
 ) -> dict:
@@ -101,6 +102,12 @@ def run_full_search_pipeline(
     previous_pending = None
     default_chunk_budget = max(1, int(get_settings().max_daily_job_chunks))
     while True:
+        if should_cancel and should_cancel():
+            preparation["cancelled"] = True
+            preparation["pending_remaining"] = int(
+                get_processing_status(client, user_id=user_id)["pending_chunking"]
+            )
+            break
         status = get_processing_status(client, user_id=user_id)
         pending = int(status["pending_chunking"])
         preparation["budget_remaining"] = int(
@@ -203,11 +210,15 @@ def run_full_search_pipeline(
     configured_daily_limit = max(1, int(get_settings().max_daily_evaluations))
     evaluation_limit = max(1, min(int(evaluation_batch_size), configured_daily_limit))
     while True:
+        if should_cancel and should_cancel():
+            evaluation["cancelled"] = True
+            break
         batch = evaluate_top_offers(
             client,
             user_id=user_id,
             top_k=evaluation_limit,
             on_progress=lambda details: emit_stage("evaluation", status="running", **details),
+            should_cancel=should_cancel,
         )
         evaluation["ranked"] += int(batch.get("ranked", 0))
         evaluation["evaluated"] += int(batch.get("evaluated", 0))
@@ -229,12 +240,13 @@ def run_full_search_pipeline(
         evaluation["api_quota_paused"] = bool(batch.get("api_quota_paused", False))
         evaluation["api_quota_message"] = batch.get("api_quota_message")
         evaluation["retry_after_seconds"] = batch.get("retry_after_seconds")
+        evaluation["cancelled"] = bool(batch.get("cancelled", False))
         report(
             f"Evaluación: {evaluation['evaluated']} ofertas evaluadas; "
             f"{len(evaluation['errors'])} incidencias."
         )
         if (batch.get("errors") or batch.get("budget_exhausted")
-                or batch.get("api_quota_paused")
+                or batch.get("api_quota_paused") or batch.get("cancelled")
                 or int(batch.get("ranked", 0)) < evaluation_limit):
             break
         if int(batch.get("evaluated", 0)) == 0:
@@ -261,8 +273,11 @@ def run_full_search_pipeline(
         ),
         "paused_for_api_quota": bool(preparation["api_quota_paused"] or evaluation["api_quota_paused"]),
         "stopped_early": bool(discovery.get("stopped_early")),
+        "cancelled": bool(preparation.get("cancelled") or evaluation.get("cancelled")),
         "completed": (
             not discovery.get("stopped_early", False)
+            and not preparation.get("cancelled", False)
+            and not evaluation.get("cancelled", False)
             and not evaluation["errors"]
             and preparation["pending_remaining"] == 0
             and int(discovery.get("errors", 0)) == 0
