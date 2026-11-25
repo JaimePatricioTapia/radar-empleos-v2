@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 MINIMUM_AFFINITY_SCORE = 85
 # Puntaje 70–84: revisión humana, no descarte automático. Umbrales provisionales.
 MANUAL_REVIEW_MINIMUM_SCORE = 70
-# Topes operativos temporales para medir la cuota real de Gemini; configurables en src/config.py.
-MAX_DAILY_JOB_CHUNKS = 1000
-MAX_DAILY_EVALUATIONS = 100
+# Topes operativos conservadores por defecto para mantener el MVP en planes gratuitos.
+MAX_DAILY_JOB_CHUNKS = 250
+MAX_DAILY_EVALUATIONS = 15
 CV_EVIDENCE_MATCH_COUNT = 8
 MAX_EVALUATION_DESCRIPTION_CHARS = 10000
 ROLLING_BUDGET_HOURS = 24

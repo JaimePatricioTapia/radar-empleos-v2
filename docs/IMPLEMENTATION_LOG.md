@@ -81,3 +81,9 @@
 - Los niveles básico/intermedio/avanzado/experto solo se muestran cuando están expresamente declarados cerca de la competencia.
 - El perfil se presenta en la interfaz y se entrega al evaluador junto con la evidencia recuperada.
 - No se infieren años de experiencia ni se modifican tablas, RLS, secretos o datos históricos.
+
+
+## 2026-11-25 — Límites gratuitos conservadores y guía de prueba MVP
+- Se corrigen los topes internos predeterminados a 250 fragmentos y 15 evaluaciones por ventana móvil de 24 horas.
+- Se aplica un máximo efectivo aunque existan secretos con valores superiores; los secretos sí pueden reducir el consumo.
+- Se alinea la documentación con la configuración y se añade guía de aceptación para la primera prueba controlada.

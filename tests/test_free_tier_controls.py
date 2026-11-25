@@ -5,9 +5,9 @@ from src.search.processing import (
 )
 
 
-def test_temporary_gemini_usage_caps_are_raised_for_quota_measurement():
-    assert MAX_DAILY_JOB_CHUNKS == 1000
-    assert MAX_DAILY_EVALUATIONS == 100
+def test_free_tier_caps_match_documented_conservative_defaults():
+    assert MAX_DAILY_JOB_CHUNKS == 250
+    assert MAX_DAILY_EVALUATIONS == 15
 
 
 def test_local_prefilter_prioritizes_mining_business_analysis_without_gemini():
