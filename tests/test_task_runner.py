@@ -71,3 +71,12 @@ def test_worker_fails_fast_if_authenticated_session_is_missing():
     import pytest
     with pytest.raises(RuntimeError, match="sesión autenticada"):
         _authenticated_worker_client(client)
+
+
+def test_search_task_cancel_signal_is_thread_safe_and_visible():
+    task = SearchTask()
+    task.request_cancel()
+
+    assert task.cancel_event.is_set()
+    assert task.cancel_requested is True
+    assert task.events.get_nowait()["type"] == "cancel_requested"

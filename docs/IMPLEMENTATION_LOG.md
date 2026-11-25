@@ -63,3 +63,13 @@
 - En lugar de consumir cuatro reintentos adicionales por cada oferta, se pausa inmediatamente la evaluación y se conservan las ofertas y evaluaciones ya persistidas.
 - Se agregan pruebas para parseo de espera, fallback de 24 horas y errores 503 no diarios.
 - No se modifican cuotas, facturación, credenciales, Supabase ni datos.
+
+
+## 2026-11-25 — Recuperación del estado de búsqueda y cancelación segura
+
+- El filtro sectorial de la bandeja se aclara como filtro de visualización: no cambia los cargos ni inicia una búsqueda.
+- Si el objeto de ejecución conserva un estado activo pero su hilo ya terminó, la interfaz recupera el estado y evita dejar deshabilitado el botón indefinidamente.
+- Se agrega cancelación cooperativa del pipeline desde cualquier etapa; espera a que termine la llamada externa actual y luego detiene nuevas consultas/evaluaciones.
+- La cancelación conserva en Supabase las ofertas, fragmentos y evaluaciones ya confirmados; no elimina ni modifica datos persistidos.
+- Se mantiene la acción existente para detener solo el descubrimiento y procesar lo recopilado.
+- No se modifican Supabase, RLS, secretos, credenciales ni facturación.

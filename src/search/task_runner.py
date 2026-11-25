@@ -47,10 +47,12 @@ class SearchTask:
 
     events: queue.Queue = field(default_factory=queue.Queue)
     stop_event: threading.Event = field(default_factory=threading.Event)
+    cancel_event: threading.Event = field(default_factory=threading.Event)
     result: dict | None = None
     error: str | None = None
     finished: bool = False
     stop_requested: bool = False
+    cancel_requested: bool = False
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     thread: threading.Thread | None = None
 
@@ -58,6 +60,12 @@ class SearchTask:
         self.stop_requested = True
         self.stop_event.set()
         self.events.put({"type": "stop_requested"})
+
+    def request_cancel(self) -> None:
+        """Solicita cancelar todo el pipeline después de la operación en curso."""
+        self.cancel_requested = True
+        self.cancel_event.set()
+        self.events.put({"type": "cancel_requested"})
 
     def start(self, client: Any, **kwargs) -> "SearchTask":
         # Leer la sesión en el hilo de Streamlit y crear un cliente independiente.
@@ -80,7 +88,8 @@ class SearchTask:
                     progress=emit_message,
                     on_progress=emit_progress,
                     on_offer=emit_offer,
-                    should_stop=self.stop_event.is_set,
+                    should_stop=lambda: self.stop_event.is_set() or self.cancel_event.is_set(),
+                    should_cancel=self.cancel_event.is_set,
                 )
             except Exception as exc:  # el trabajo confirmado permanece en Supabase
                 self.error = f"{type(exc).__name__}: {exc}"
