@@ -224,10 +224,9 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                     max(limit_per_query, min(limit_per_query * len(search_terms), 25))
                     if source == "linkedin" else limit_per_query
                 )
-                # Consultar el cargo tal como está definido. Agregar términos
-                # de dominio con AND implícito estrechaba demasiado la búsqueda
-                # y excluía ofertas equivalentes; los domain_terms se conservan
-                # como metadatos de trazabilidad, no como filtros de consulta.
+                # Consultar cada cargo o función tal como está definido.
+                # Agregar términos de dominio con AND implícito estrechaba
+                # demasiado la búsqueda y excluía ofertas equivalentes.
                 connector_query = query
                 offers = connector(connector_query, limit=query_limit)
                 consecutive_errors = 0
