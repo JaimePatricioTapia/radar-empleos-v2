@@ -262,7 +262,7 @@ def run_discovery(client, *, user_id: str, roles: list[str], sources: list[str],
                             for item in matched_families
                         ],
                         "query": query_label,
-                        "query_type": "funcion" if query_label in functions else "cargo",
+                        "query_type": "funcion" if query_label in functions else ("cargo_y_funcion" if source == "linkedin" and functions else "cargo"),
                         "domain_terms": (family_for_query or {}).get("domain_terms", []) if source != "linkedin" else [],
                     }
                     offer["raw_metadata"] = metadata
