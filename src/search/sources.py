@@ -400,6 +400,7 @@ def search_finning(query: str, limit: int = 12) -> list[dict]:
 SOURCE_REGISTRY = {
     # Google Jobs se excluye: JobSpy 1.5.0 lo reporta actualmente no disponible.
     "linkedin": ("LinkedIn", "linkedin"), "indeed": ("Indeed", "indeed"),
+    "glassdoor": ("Glassdoor", "glassdoor"),
     "getonbrd": ("Get on Board", "getonbrd"),
     "chiletrabajos": ("Chiletrabajos", "chiletrabajos"),
     "computrabajo": ("Computrabajo", "computrabajo"),
@@ -410,6 +411,7 @@ SOURCE_REGISTRY = {
 }
 CONNECTORS = {
     "linkedin": search_linkedin, "indeed": search_indeed,
+    "glassdoor": search_glassdoor,
     "getonbrd": search_getonbrd,
     "chiletrabajos": search_chiletrabajos, "computrabajo": search_computrabajo,
     "contutalento": search_contutalento, "bne": search_bne,
