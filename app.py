@@ -8,7 +8,7 @@ from src.config import get_settings
 from src.cv.service import ingest_cv_upload
 from src.db.client import get_supabase_client
 from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES
-from src.search.processing import MINIMUM_AFFINITY_SCORE, classify_sector
+from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_SCORE, classify_sector
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
 from src.search.role_families import derive_role_families
@@ -492,92 +492,149 @@ if st.session_state.get("radar_search_task") is not None:
     render_search_task()
 
 st.divider()
-st.header("📌 Bandeja priorizada")
+st.header("📌 Bandeja de oportunidades")
 st.caption(
-    f"Solo se muestran ofertas NUEVAS con afinidad profesional igual o superior a "
-    f"{MINIMUM_AFFINITY_SCORE}%. El orden prioriza afinidad; el sector solo desempata. "
-    "El filtro siguiente solo cambia las ofertas visibles; no modifica ni repite la búsqueda."
+    "La afinidad mide compatibilidad profesional; el atractivo ajusta esa afinidad según la preferencia de renta. "
+    "Los rangos son provisionales y no equivalen a una probabilidad de contratación."
 )
 sector_filter = st.selectbox(
     "Filtro sectorial",
     options=["Todos los sectores", "Solo minería"],
     key="inbox_sector_filter",
 )
+
+def render_offer_card(item, evaluation_record=None):
+    metadata = item.get("raw_metadata") or {}
+    evaluation_meta = metadata.get("evaluation") or {}
+    evaluation = (evaluation_record or {}).get("result_json") or {}
+    score = item.get("affinity_score")
+    attractiveness = evaluation_meta.get("attractiveness_score")
+    if attractiveness is None and score is not None:
+        attractiveness = score
+    salary = evaluation_meta.get("salary_preference") or {}
+    with st.container(border=True):
+        st.markdown(f"**{item['title']}**")
+        st.write(f"{item.get('company') or 'Empresa no informada'} · {item.get('sector_category') or 'POR_CLASIFICAR'}")
+        metric_cols = st.columns(2)
+        metric_cols[0].metric("Afinidad profesional", f"{score}/100" if score is not None else "Pendiente")
+        metric_cols[1].metric("Atractivo ajustado", f"{attractiveness}/100" if attractiveness is not None else "Pendiente")
+        salary_text = item.get("salary_text")
+        if salary.get("label"):
+            st.caption(f"Renta: {salary.get('label')}")
+        elif salary_text:
+            st.caption(f"Renta publicada: {salary_text} · comparación pendiente")
+        else:
+            st.caption("Renta no informada · sin penalización")
+        search_origin = metadata.get("search_origin") or {}
+        origin_families = search_origin.get("families") or []
+        if origin_families:
+            st.caption("Familia de búsqueda: " + ", ".join(
+                family.get("name", family.get("id", "")) for family in origin_families if family
+            ))
+        publication_status = metadata.get("publication_date_status")
+        if publication_status == "unknown":
+            st.caption("Fecha de publicación no informada por el portal; antigüedad no verificable.")
+        elif publication_status == "verified_recent":
+            st.caption("Fecha de publicación verificada: dentro de los últimos 14 días.")
+        if evaluation:
+            with st.expander("Ver análisis, fortalezas, brechas y evidencia"):
+                st.write(f"**Veredicto:** {evaluation.get('verdict', 'No informado')}")
+                if evaluation.get("strengths"):
+                    st.markdown("**Fortalezas**")
+                    for value in evaluation["strengths"]:
+                        st.write(f"- {value}")
+                if evaluation.get("gaps"):
+                    st.markdown("**Brechas**")
+                    for value in evaluation["gaps"]:
+                        st.write(f"- {value}")
+                if evaluation.get("evidence"):
+                    st.markdown("**Matriz de requisitos y evidencia**")
+                    for evidence in evaluation["evidence"]:
+                        st.write(
+                            f"- **{evidence.get('requirement', 'Requisito')}** "
+                            f"({evidence.get('importance', 'sin clasificar')} · {evidence.get('status', 'no evaluable')}): "
+                            f"{evidence.get('cv_evidence', 'Sin evidencia registrada')}"
+                        )
+                if evaluation.get("hard_constraints"):
+                    st.markdown("**Restricciones explícitas**")
+                    for value in evaluation["hard_constraints"]:
+                        st.write(f"- {value}")
+                if evaluation.get("uncertainty_notes"):
+                    st.markdown("**Incertidumbres**")
+                    for value in evaluation["uncertainty_notes"]:
+                        st.write(f"- {value}")
+        if item.get("source_url"):
+            st.link_button("Abrir publicación", item["source_url"])
+        with st.form(f"lifecycle_{item['id']}"):
+            new_status = st.selectbox(
+                "Estado", ["NUEVA", "POSTULADO", "DESCARTADO", "CADUCADO", "ERROR"],
+                index=0, key=f"status_{item['id']}"
+            )
+            reason = st.text_input("Motivo / nota (opcional)", key=f"reason_{item['id']}")
+            save_status = st.form_submit_button("Guardar estado")
+        if save_status and new_status != item["lifecycle_status"]:
+            try:
+                client.rpc("set_job_offer_lifecycle_status", {
+                    "target_job_offer_id": item["id"],
+                    "new_status": new_status,
+                    "reason": reason.strip() or None
+                }).execute()
+                if new_status == "POSTULADO":
+                    client.table("applications").upsert({
+                        "user_id": user["id"], "job_offer_id": item["id"],
+                        "status": "postulado", "notes": reason.strip() or None
+                    }, on_conflict="user_id,job_offer_id").execute()
+                st.success("Estado actualizado.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"No se pudo actualizar el estado: {exc}")
+
 try:
-    inbox_query = (client.table("job_offers")
-                   .select("id,title,company,location,source,source_url,description,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
-                   .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
-                   .gte("affinity_score", MINIMUM_AFFINITY_SCORE)
-                   .order("affinity_score", desc=True)
-                   .order("priority_score", desc=True))
-    inbox = inbox_query.limit(1000).execute().data or []
-    # Recalcular en memoria con el clasificador vigente para no depender de
-    # categorías antiguas que pudieron quedar mal asignadas.
+    inbox = (
+        client.table("job_offers")
+        .select("id,title,company,location,source,source_url,description,salary_text,lifecycle_status,sector_category,affinity_score,priority_score,raw_metadata")
+        .eq("user_id", user["id"]).eq("lifecycle_status", "NUEVA")
+        .order("captured_at", desc=True).limit(1000).execute().data or []
+    )
+    inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]
     for item in inbox:
         item["sector_category"] = classify_sector(item)
-    inbox = [item for item in inbox if not (item.get("raw_metadata") or {}).get("evaluation_filter")]
     if sector_filter == "Solo minería":
         inbox = [item for item in inbox if item["sector_category"] in ("MINERIA", "PROVEEDOR_MINERO")]
-    inbox.sort(
-        key=lambda item: (item.get("affinity_score") or -1, item.get("priority_score") or -1),
-        reverse=True,
-    )
+    evaluation_by_offer = {}
+    if active_cv:
+        evaluation_rows = (
+            client.table("evaluations")
+            .select("job_offer_id,result_json,cv_version_id")
+            .eq("user_id", user["id"]).eq("cv_version_id", active_cv[0]["id"])
+            .limit(1000).execute().data or []
+        )
+        evaluation_by_offer = {row["job_offer_id"]: row for row in evaluation_rows}
+    def attractiveness(item):
+        value = ((item.get("raw_metadata") or {}).get("evaluation") or {}).get("attractiveness_score")
+        return int(value if value is not None else item.get("affinity_score") or -1)
+    inbox.sort(key=lambda item: (attractiveness(item), item.get("affinity_score") or -1, item.get("priority_score") or -1), reverse=True)
+    recommended = [item for item in inbox if item.get("affinity_score") is not None and int(item["affinity_score"]) >= MINIMUM_AFFINITY_SCORE]
+    review = [item for item in inbox if item.get("affinity_score") is not None and 70 <= int(item["affinity_score"]) < MINIMUM_AFFINITY_SCORE]
+    lower = [item for item in inbox if item.get("affinity_score") is not None and int(item["affinity_score"]) < 70]
+    pending = [item for item in inbox if item.get("affinity_score") is None]
+    st.subheader(f"Recomendadas · {len(recommended)}")
+    st.caption(f"Afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%. Revisar evidencia antes de postular.")
+    for item in recommended:
+        render_offer_card(item, evaluation_by_offer.get(item["id"]))
+    st.subheader(f"Revisión manual · {len(review)}")
+    st.caption("Afinidad entre 70% y 84%. No se descartan: revise requisitos, brechas y condiciones.")
+    for item in review:
+        render_offer_card(item, evaluation_by_offer.get(item["id"]))
+    with st.expander(f"Otras evaluadas bajo 70% · {len(lower)}"):
+        st.caption("Se conservan visibles para que un puntaje no calibrado no elimine oportunidades automáticamente.")
+        for item in lower:
+            render_offer_card(item, evaluation_by_offer.get(item["id"]))
+    with st.expander(f"Pendientes de evaluación · {len(pending)}"):
+        for item in pending:
+            render_offer_card(item)
     if not inbox:
-        if sector_filter == "Solo minería":
-            st.info(f"No hay ofertas mineras NUEVAS con afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%.")
-        else:
-            st.info(f"No hay ofertas NUEVAS con afinidad igual o superior a {MINIMUM_AFFINITY_SCORE}%. Prepare y evalúe más ofertas para ampliar las recomendaciones.")
-    for item in inbox:
-        with st.container(border=True):
-            st.markdown(f"**{item['title']}**")
-            st.write(
-                f"{item.get('company') or 'Empresa no informada'} · "
-                f"{item.get('sector_category') or 'POR_CLASIFICAR'}"
-            )
-            search_origin = (item.get("raw_metadata") or {}).get("search_origin") or {}
-            origin_families = search_origin.get("families") or []
-            if origin_families:
-                st.caption("Familia de búsqueda: " + ", ".join(
-                    family.get("name", family.get("id", ""))
-                    for family in origin_families if family
-                ))
-            publication_status = (item.get("raw_metadata") or {}).get("publication_date_status")
-            if publication_status == "unknown":
-                st.caption("Fecha de publicación no informada por el portal; antigüedad no verificable.")
-            elif publication_status == "verified_recent":
-                st.caption("Fecha de publicación verificada: dentro de los últimos 14 días.")
-            if item.get("affinity_score") is not None:
-                st.write(
-                    f"Afinidad: **{item['affinity_score']}%** · "
-                    f"Prioridad: **{item.get('priority_score') or 0}/100**"
-                )
-            else:
-                st.caption("Pendiente de evaluación")
-            if item.get("source_url"):
-                st.link_button("Abrir publicación", item["source_url"])
-            with st.form(f"lifecycle_{item['id']}"):
-                new_status = st.selectbox(
-                    "Estado", ["NUEVA", "POSTULADO", "DESCARTADO", "CADUCADO", "ERROR"],
-                    index=0, key=f"status_{item['id']}"
-                )
-                reason = st.text_input("Motivo / nota (opcional)", key=f"reason_{item['id']}")
-                save_status = st.form_submit_button("Guardar estado")
-            if save_status and new_status != item["lifecycle_status"]:
-                try:
-                    client.rpc("set_job_offer_lifecycle_status", {
-                        "target_job_offer_id": item["id"],
-                        "new_status": new_status,
-                        "reason": reason.strip() or None
-                    }).execute()
-                    if new_status == "POSTULADO":
-                        client.table("applications").upsert({
-                            "user_id": user["id"], "job_offer_id": item["id"],
-                            "status": "postulado", "notes": reason.strip() or None
-                        }, on_conflict="user_id,job_offer_id").execute()
-                    st.success("Estado actualizado.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"No se pudo actualizar el estado: {exc}")
+        st.info("Todavía no hay ofertas nuevas en esta bandeja. Ejecute una búsqueda o evalúe una oferta manualmente.")
 except Exception as exc:
     st.error(f"No se pudo cargar la bandeja: {exc}")
 
@@ -588,6 +645,7 @@ with st.form("evaluate_offer_form"):
     offer_title = st.text_input("Cargo", placeholder="Business Analyst Senior")
     offer_company = st.text_input("Empresa (opcional)")
     offer_location = st.text_input("Ubicación (opcional)")
+    offer_salary = st.text_input("Renta informada (opcional)", placeholder="$1.200.000 líquidos, renta bruta o a convenir")
     offer_url = st.text_input("URL del aviso (opcional)")
     offer_description = st.text_area("Descripción y requisitos", height=200, placeholder="Pegue aquí el contenido completo del aviso...")
     evaluate_submitted = st.form_submit_button("Evaluar compatibilidad")
@@ -598,6 +656,7 @@ if evaluate_submitted:
         payload = {
             "title": offer_title, "company": offer_company or None,
             "location": offer_location or None, "source_url": offer_url or None,
+            "salary_text": offer_salary or None,
             "source": "manual", "description": offer_description,
         }
         with st.spinner("Buscando evidencia en su CV y evaluando con Gemini..."):
