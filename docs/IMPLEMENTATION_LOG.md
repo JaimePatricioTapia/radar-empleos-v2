@@ -45,3 +45,13 @@
 - Los reintentos breves (hasta 60 s) conservan el comportamiento acotado existente.
 - BNE timeout, Codelco HTTP 403 y Finning HTTP 429 son fallas aisladas por portal. No se evaden bloqueos; se mantiene la continuidad con otras fuentes y el cortacircuito por errores consecutivos.
 - No se modifican Supabase, esquema/RLS, datos, credenciales, topes, facturación ni cuotas de Google.
+
+## 2026-11-25 — Recuperación de cobertura de búsqueda (PR #22)
+
+- Se eliminó la concatenación obligatoria de términos de dominio a cada cargo: ahora se consulta el título original para evitar filtros AND accidentales; los términos de dominio siguen como metadatos.
+- Se restaura el límite inicial de 15 resultados por consulta, equivalente al de la primera versión.
+- Indeed consulta Chile y Antofagasta y solicita descripciones; se deduplican los resultados entre ubicaciones.
+- Se agrega Glassdoor mediante JobSpy como fuente independiente, con descarga de descripciones.
+- LinkedIn conserva la descarga de descripciones desactivada y, ante bloqueos 403/429, no insiste con otra ubicación.
+- Se mantienen los 14 días, la deduplicación, el filtro de pertinencia, la autenticación y el esquema actual de Supabase.
+- Validación pendiente de CI y de una búsqueda real desde Streamlit; las fuentes externas pueden seguir limitando solicitudes.

@@ -67,6 +67,58 @@ def test_jobspy_calls_only_the_requested_portal_and_does_not_fetch_details(monke
     assert "linkedin_fetch_description" not in kwargs
 
 
+def test_indeed_searches_chile_and_antofagasta_and_fetches_descriptions(monkeypatch):
+    def frame_for(job_id):
+        return SimpleNamespace(
+            attrs={},
+            empty=False,
+            to_dict=lambda orient: [{
+                "site": "indeed",
+                "title": f"Analista Funcional {job_id}",
+                "job_url": f"https://cl.indeed.com/viewjob?jk={job_id}",
+                "company_name": "Empresa",
+                "description": "Levantamiento de requerimientos, procesos y proyectos TI.",
+            }],
+        )
+
+    scrape = Mock(side_effect=[frame_for("a1"), frame_for("a2")])
+    monkeypatch.setitem(sys.modules, "jobspy", SimpleNamespace(scrape_jobs=scrape))
+
+    offers = search_jobspy_site("Analista Funcional", site="indeed", limit=15)
+
+    assert len(offers) == 2
+    assert [call.kwargs["location"] for call in scrape.call_args_list] == [
+        "Chile", "Antofagasta, Chile"
+    ]
+    assert all(call.kwargs["fetch_description"] is True for call in scrape.call_args_list)
+    assert offers[1]["raw_metadata"]["search_location"] == "Antofagasta, Chile"
+
+
+def test_glassdoor_is_registered_as_an_independent_jobspy_source(monkeypatch):
+    from src.search.sources import CONNECTORS, SOURCE_REGISTRY
+
+    frame = SimpleNamespace(
+        attrs={},
+        empty=False,
+        to_dict=lambda orient: [{
+            "site": "glassdoor",
+            "title": "IT Business Analyst",
+            "job_url": "https://www.glassdoor.com/job-listing/123",
+            "company_name": "Empresa",
+            "description": "Requirements analysis and IT projects.",
+        }],
+    )
+    scrape = Mock(return_value=frame)
+    monkeypatch.setitem(sys.modules, "jobspy", SimpleNamespace(scrape_jobs=scrape))
+
+    offers = search_jobspy_site("IT Business Analyst", site="glassdoor")
+
+    assert SOURCE_REGISTRY["glassdoor"][1] == "glassdoor"
+    assert CONNECTORS["glassdoor"] is not None
+    assert len(offers) == 1
+    assert scrape.call_args.kwargs["fetch_description"] is True
+
+
 def test_jobspy_surfaces_source_errors_instead_of_silently_returning_empty(monkeypatch):
     frame = SimpleNamespace(
         attrs={"errors": {"linkedin": "response status code 429 (blocked: use a proxy)"}},
@@ -96,6 +148,7 @@ def test_linkedin_is_one_grouped_query_and_indeed_remains_per_role():
 def test_jobspy_sources_are_independent_and_google_jobs_is_not_advertised():
     assert SOURCE_REGISTRY["linkedin"][1] == "linkedin"
     assert SOURCE_REGISTRY["indeed"][1] == "indeed"
+    assert SOURCE_REGISTRY["glassdoor"][1] == "glassdoor"
     assert CONNECTORS["linkedin"] is not CONNECTORS["indeed"]
     assert "google" not in SOURCE_REGISTRY
 
@@ -120,6 +173,31 @@ def test_run_discovery_does_not_repeat_linkedin_for_each_selected_jobspy_source(
     assert indeed.call_count == 3
     assert result["queries"] == 4
     assert result["errors"] == 0
+
+
+def test_domain_terms_do_not_narrow_the_actual_search_query(monkeypatch):
+    from src.search import ingestion
+
+    connector = Mock(return_value=[])
+    monkeypatch.setitem(ingestion.CONNECTORS, "getonbrd", connector)
+    family = {
+        "family_id": "business_analysis",
+        "family_name": "Análisis de negocio y procesos",
+        "priority": 1,
+        "titles": ["Business Analyst"],
+        "domain_terms": ["requerimientos", "historias de usuario", "procesos"],
+        "evidence": ["business analyst", "PBI"],
+    }
+
+    ingestion.run_discovery(
+        client=object(),
+        user_id="user-1",
+        roles=["Business Analyst"],
+        sources=["getonbrd"],
+        role_context=[family],
+    )
+
+    assert connector.call_args.args[0] == "Business Analyst"
 
 
 def test_linkedin_failure_does_not_stop_other_portals(monkeypatch):

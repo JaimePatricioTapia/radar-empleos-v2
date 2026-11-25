@@ -174,7 +174,7 @@ limit_per_query = st.slider(
     "Máximo de resultados por consulta y portal",
     min_value=5,
     max_value=30,
-    value=10,
+    value=15,
     step=5,
 )
 estimated_queries = sum(
