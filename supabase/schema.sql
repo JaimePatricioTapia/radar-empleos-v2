@@ -414,7 +414,7 @@ create table public.user_search_terms (
     user_id uuid not null references auth.users(id) on delete cascade,
     term_type text not null check (term_type in ('cargo', 'funcion')),
     term text not null check (char_length(btrim(term)) between 2 and 160),
-    normalized_term text generated always as (lower(btrim(term))) stored,
+    normalized_term text generated always as (lower(regexp_replace(btrim(term), '[[:space:]]+', ' ', 'g'))) stored,
     enabled boolean not null default true,
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
