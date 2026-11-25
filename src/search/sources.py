@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import html
+import ipaddress
 import re
+import socket
 import unicodedata
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote_plus, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -394,6 +396,96 @@ def search_finning(query: str, limit: int = 12) -> list[dict]:
         )
         if offer:
             results.append(offer)
+    return results
+
+
+def _validate_public_portal_url(url: str) -> str:
+    """Valida destinos HTTP(S) públicos y evita localhost/redes privadas."""
+    parts = urlsplit(str(url or "").strip())
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("La URL debe comenzar con https:// o http:// y tener un dominio válido.")
+    if parts.username or parts.password:
+        raise ValueError("No se permiten credenciales embebidas en la URL.")
+    host = parts.hostname.lower().rstrip(".")
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        raise ValueError("No se permiten direcciones locales o privadas.")
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            }
+        except OSError as exc:
+            raise ValueError("No se pudo resolver el dominio del portal.") from exc
+    if not addresses or any(
+        address.is_private or address.is_loopback or address.is_link_local
+        or address.is_reserved or address.is_multicast or address.is_unspecified
+        for address in addresses
+    ):
+        raise ValueError("El portal debe estar alojado en un dominio público.")
+    return url
+
+
+def search_custom_portal(query: str, *, portal: dict, limit: int = 15) -> list[dict]:
+    """Lee una página pública de resultados configurada por el usuario.
+
+    La URL puede incluir {query}; si no lo incluye, se agrega el parámetro q.
+    Solo extrae enlaces y texto público del HTML; no inicia sesión ni evade CAPTCHA.
+    """
+    template = str(portal.get("url_template") or "").strip()
+    if "{query}" in template:
+        target = template.replace("{query}", quote_plus(str(query)))
+    else:
+        parts = urlsplit(template)
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        params["q"] = str(query)
+        target = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+    _validate_public_portal_url(target)
+    response = _request_get(target, timeout=TIMEOUT, allow_redirects=False)
+    if response.status_code in {301, 302, 303, 307, 308}:
+        raise ValueError("El portal redirigió la búsqueda; ingrese directamente su URL pública de resultados.")
+    response.raise_for_status()
+    _validate_public_portal_url(response.url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    results = []
+    seen = set()
+    for anchor in soup.select("a[href]"):
+        title = clean_text(anchor.get_text(" ", strip=True))
+        href = urljoin(response.url, anchor.get("href", ""))
+        parts = urlsplit(href)
+        if len(title) < 8 or len(title) > 180 or parts.scheme not in {"http", "https"}:
+            continue
+        if parts.netloc.lower() != urlsplit(response.url).netloc.lower():
+            continue
+        if href in seen or href.rstrip("/") == response.url.rstrip("/"):
+            continue
+        lowered = title.casefold()
+        if any(word in lowered for word in ("iniciar sesión", "registrarse", "contacto", "privacidad", "cookies")):
+            continue
+        seen.add(href)
+        container = anchor
+        for _ in range(3):
+            if getattr(container, "parent", None) is None:
+                break
+            container = container.parent
+            if len(clean_text(container.get_text(" ", strip=True))) >= 80:
+                break
+        text = clean_text(container.get_text(" ", strip=True))
+        description = text if len(text) >= 80 else title
+        offer = normalize_offer(
+            source=str(portal.get("id") or "custom"),
+            title=title, url=href,
+            company=str(portal.get("name") or "Portal personalizado"),
+            description=description,
+            published_at=_extract_published_at(container),
+            raw_metadata={"custom_portal": True, "portal_name": str(portal.get("name") or "")},
+        )
+        if offer:
+            results.append(offer)
+        if len(results) >= max(1, min(int(limit), 30)):
+            break
     return results
 
 
