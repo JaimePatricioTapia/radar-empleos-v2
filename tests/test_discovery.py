@@ -67,6 +67,39 @@ def test_jobspy_calls_only_the_requested_portal_and_does_not_fetch_details(monke
     assert "linkedin_fetch_description" not in kwargs
 
 
+def test_indeed_searches_chile_and_antofagasta_and_fetches_descriptions(monkeypatch):
+    def frame_for(job_id):
+        return SimpleNamespace(
+            attrs={},
+            empty=False,
+            to_dict=lambda orient: [{
+                "site": "indeed",
+                "title": f"Analista Funcional {job_id}",
+                "job_url": f"https://cl.indeed.com/viewjob?jk={job_id}",
+                "company_name": "Empresa",
+                "description": "Levantamiento de requerimientos, procesos y proyectos TI.",
+            }],
+        )
+
+    scrape = Mock(side_effect=[frame_for("a1"), frame_for("a2")])
+    monkeypatch.setitem(sys.modules, "jobspy", SimpleNamespace(scrape_jobs=scrape))
+
+    offers = search_jobspy_site("Analista Funcional", site="indeed", limit=15)
+
+    assert len(offers) == 2
+    assert [call.kwargs["location"] for call in scrape.call_args_list] == [
+        "Chile", "Antofagasta, Chile"
+    ]
+    assert all(call.kwargs["fetch_description"] is True for call in scrape.call_args_list)
+    assert offers[1]["raw_metadata"]["search_location"] == "Antofagasta, Chile"
+
+
+def test_glassdoor_is_registered_as_an_independent_jobspy_source():
+    from src.search.sources import CONNECTORS, SOURCE_REGISTRY
+    assert SOURCE_REGISTRY["glassdoor"][1] == "glassdoor"
+    assert callable(CONNECTORS["glassdoor"])
+
+
 def test_jobspy_surfaces_source_errors_instead_of_silently_returning_empty(monkeypatch):
     frame = SimpleNamespace(
         attrs={"errors": {"linkedin": "response status code 429 (blocked: use a proxy)"}},
@@ -96,6 +129,7 @@ def test_linkedin_is_one_grouped_query_and_indeed_remains_per_role():
 def test_jobspy_sources_are_independent_and_google_jobs_is_not_advertised():
     assert SOURCE_REGISTRY["linkedin"][1] == "linkedin"
     assert SOURCE_REGISTRY["indeed"][1] == "indeed"
+    assert SOURCE_REGISTRY["glassdoor"][1] == "glassdoor"
     assert CONNECTORS["linkedin"] is not CONNECTORS["indeed"]
     assert "google" not in SOURCE_REGISTRY
 
