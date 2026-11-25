@@ -4,7 +4,7 @@
 - **Versión:** 1.2 (línea base + control de cuota gratuita + preferencias persistentes de búsqueda)
 - **Fecha:** 2026-11-25
 - **Estado:** Borrador controlado para validación del propietario
-- **Rama de trabajo:** `feature/free-tier-token-optimization`
+- **Rama de trabajo de esta actualización:** `feature/persist-search-preferences` (base `feature/streamlit-cloud-deployment`)
 - **Principio:** una mejora no puede eliminar ni degradar funciones existentes sin aprobación expresa.
 
 ## 1. Propósito y control de cambios
