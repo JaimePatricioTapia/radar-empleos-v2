@@ -6,6 +6,7 @@ import logging
 import time
 import hashlib
 import json
+import re
 from google import genai
 from src.config import get_settings
 from src.evaluation.schemas import OfferEvaluation
@@ -29,6 +30,27 @@ class GeminiEvaluationDeferred(RuntimeError):
 
 def load_system_prompt() -> str:
     return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def _daily_quota_retry_seconds(message: str) -> float | None:
+    """Extrae la espera de una cuota diaria agotada (p. ej. 22h9m16s)."""
+    lowered = message.lower()
+    if not any(marker in lowered for marker in (
+        "requests per day limit exceeded",
+        "per day limit exceeded",
+        "daily limit exceeded",
+        "generaterequestsperday",
+    )):
+        return None
+    match = re.search(
+        r"(?:(\\d+)\\s*h)?\\s*(?:(\\d+)\\s*m)?\\s*(?:(\\d+(?:\\.\\d+)?)\\s*s)?",
+        message,
+        flags=re.IGNORECASE,
+    )
+    if match and any(part is not None for part in match.groups()):
+        hours, minutes, seconds = match.groups()
+        return max(60.0, (int(hours or 0) * 3600) + (int(minutes or 0) * 60) + float(seconds or 0))
+    return 24 * 3600.0
 
 
 def _is_unavailable_model_error(exc: Exception) -> bool:
@@ -84,6 +106,16 @@ def evaluate_offer(
             response = client.models.generate_content(**request)
             break
         except Exception as exc:
+            # Una cuota diaria agotada no es un fallo transitorio: no reintentar
+            # cada oferta. Pausar la etapa y conservar todo lo persistido.
+            quota_wait = _daily_quota_retry_seconds(str(exc))
+            if quota_wait is not None:
+                message = (
+                    f"Gemini agotó la cuota diaria gratuita del modelo {model_name}. "
+                    f"Google indicó esperar aproximadamente {quota_wait:.0f} segundos. "
+                    "La evaluación se pausó; las ofertas pendientes se conservan."
+                )
+                raise GeminiEvaluationDeferred(message, quota_wait, model_name) from exc
             if _is_unavailable_model_error(exc) and model_name != FALLBACK_MODEL:
                 logger.warning(
                     "El modelo Gemini %s ya no está disponible; se cambia automáticamente a %s.",
