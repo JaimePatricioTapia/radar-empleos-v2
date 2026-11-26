@@ -86,3 +86,17 @@ def test_custom_portal_rejects_non_http_urls():
             Client(), user_id="u1", name="Portal",
             url_template="file:///etc/passwd",
         )
+
+
+
+def test_custom_portal_rejects_second_url_for_same_domain():
+    client = Client()
+    save_search_portal(
+        client, user_id="u1", name="Portal principal",
+        url_template="https://jobs.example.cl/search?q={query}",
+    )
+    with pytest.raises(ValueError, match="mismo portal"):
+        save_search_portal(
+            client, user_id="u1", name="Otra sección",
+            url_template="https://www.jobs.example.cl/careers",
+        )
