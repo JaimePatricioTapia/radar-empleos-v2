@@ -1,4 +1,9 @@
 name: Python tests
+# Includes validation for the free-tier optimization branch and cloud deployment PRs.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
@@ -6,11 +11,22 @@ on:
       - main
       - feature/semantic-evaluation-ranking
       - feature/affinity-threshold-mining-filter
+      - feature/one-click-search-85-affinity
+      - feature/streamlit-cloud-deployment
+      - feature/radar-14d-progress-resume
+      - feature/free-tier-token-optimization-v2
+      - feature/cv-derived-role-families
+      - fix/background-supabase-auth-evaluation
   pull_request:
     branches:
       - main
       - feature/multisource-job-discovery-stage1
       - feature/semantic-evaluation-ranking
+      - feature/affinity-threshold-mining-filter
+      - feature/one-click-search-85-affinity
+      - feature/streamlit-cloud-deployment
+      - feature/streamlit-cloud-deployment
+      - feature/radar-14d-progress-resume
 
 jobs:
   unit-tests:
@@ -25,5 +41,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Compile application and modules
+        run: python -m compileall -q app.py src tests
       - name: Run unit tests
         run: pytest -q

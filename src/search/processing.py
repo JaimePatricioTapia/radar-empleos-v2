@@ -2,17 +2,28 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
 
 from src.config import get_settings
 from src.cv.embeddings import embed_texts
 from src.db.repository import save_evaluation
-from src.evaluation.evaluator import evaluate_offer
+from src.evaluation.evaluator import evaluate_offer, GeminiEvaluationDeferred
 from src.search.job_chunker import chunk_job_description
+from src.search.salary import analyse_salary, attractiveness_score
+from src.cv.skills_profile import derive_skills_profile
 
 logger = logging.getLogger(__name__)
 
-MINIMUM_AFFINITY_SCORE = 75
+MINIMUM_AFFINITY_SCORE = 85
+# Puntaje 70–84: revisión humana, no descarte automático. Umbrales provisionales.
+MANUAL_REVIEW_MINIMUM_SCORE = 70
+# Topes operativos conservadores por defecto para mantener el MVP en planes gratuitos.
+MAX_DAILY_JOB_CHUNKS = 250
+MAX_DAILY_EVALUATIONS = 15
+CV_EVIDENCE_MATCH_COUNT = 8
+MAX_EVALUATION_DESCRIPTION_CHARS = 10000
+ROLLING_BUDGET_HOURS = 24
 
 SECTOR_WEIGHTS = {
     "MINERIA": 100,
@@ -119,7 +130,7 @@ def _excluded_reason(offer: dict) -> str | None:
 
 
 def meets_affinity_threshold(score: int | None) -> bool:
-    """Solo una afinidad laboral evaluada >=75 puede ser recomendada."""
+    """Solo una afinidad laboral evaluada >=85 puede ser recomendada."""
     return score is not None and int(score) >= MINIMUM_AFFINITY_SCORE
 
 
@@ -129,33 +140,90 @@ def _priority_score(affinity: int, sector: str) -> int:
     return max(0, min(100, int(0.75 * affinity + 0.25 * sector_weight + 0.5)))
 
 
-def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
-    """Genera chunks/embeddings solo para ofertas nuevas que aún no se procesaron."""
+def _rolling_budget_start() -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=ROLLING_BUDGET_HOURS)).isoformat()
+
+
+def _daily_chunk_usage(client: Any, *, user_id: str, daily_limit: int | None = None) -> int:
+    limit = max(1, int(daily_limit or get_settings().max_daily_job_chunks))
+    rows = (client.table("job_chunks").select("id").eq("user_id", user_id)
+            .gte("created_at", _rolling_budget_start())
+            .limit(limit).execute().data or [])
+    return len(rows)
+
+
+def _local_relevance_score(offer: dict) -> int:
+    """Preselección gratuita y explicable; solo ordena, no descarta por afinidad."""
+    title = _normalize_text(offer.get("title") or "")
+    company = _normalize_text(offer.get("company") or "")
+    description = _normalize_text((offer.get("description") or "")[:5000])
+    score = 0
+    title_terms = (
+        "business analyst", "analista de negocio", "analista funcional",
+        "project manager", "jefe de proyectos", "gerente de proyectos",
+        "pmo", "transformacion digital", "product owner", "product manager",
+        "analista de procesos", "especialista tecnologia", "sistemas mineros",
+    )
+    for term in title_terms:
+        if term in title:
+            score += 8
+    mining_terms = ("mineria", "minera", "minero", "codelco", "bhp", "escondida",
+                    "collahuasi", "sqm", "teck", "finning", "master drilling",
+                    "antofagasta minerals", "raise boring")
+    if any(term in f"{title} {company}" for term in mining_terms):
+        score += 8
+    if any(term in description for term in mining_terms):
+        score += 3
+    if any(term in description for term in ("levantamiento de requisitos", "procesos",
+                                               "transformacion digital", "sistemas",
+                                               "gestion de proyectos", "analisis funcional")):
+        score += 3
+    if any(term in f"{title} {description}" for term in ("sql", "power bi", "sap", "jira", "datos")):
+        score += 1
+    return score
+
+
+def build_job_chunks(
+    client: Any, *, user_id: str, limit: int = 100,
+    on_progress: Callable[[dict], None] | None = None,
+) -> dict:
+    """Prepara ofertas prioritarias y persiste cada sublote apenas se calcula."""
     settings = get_settings()
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
+
+    daily_chunk_limit = max(1, int(settings.max_daily_job_chunks))
+    used_today = _daily_chunk_usage(client, user_id=user_id, daily_limit=daily_chunk_limit)
+    budget_remaining = max(0, daily_chunk_limit - used_today)
     offers = (client.table("job_offers")
-              .select("id,title,company,description,raw_metadata,lifecycle_status")
+              .select("id,title,company,description,raw_metadata,lifecycle_status,captured_at")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .order("captured_at", desc=True).limit(1000).execute().data or [])
+    empty = {
+        "offers_seen": len(offers), "offers_chunked": 0, "chunks_saved": 0,
+        "insufficient": 0, "excluded": 0, "eligible_pending": 0,
+        "budget_exhausted": budget_remaining == 0,
+        "budget_remaining": budget_remaining, "chunks_embedded_last_24h": used_today,
+    }
     if not offers:
-        return {"offers_seen": 0, "offers_chunked": 0, "chunks_saved": 0, "insufficient": 0, "excluded": 0, "eligible_pending": 0}
+        return empty
 
     offer_ids = [item["id"] for item in offers]
     existing_rows = []
     for start in range(0, len(offer_ids), 100):
         existing_rows.extend(
-            client.table("job_chunks").select("job_offer_id")
+            client.table("job_chunks").select("job_offer_id,chunk_index")
             .eq("user_id", user_id).in_("job_offer_id", offer_ids[start:start + 100])
             .execute().data or []
         )
-    already = {row["job_offer_id"] for row in existing_rows}
-    eligible, chunk_rows = [], []
+    existing_by_offer: dict[str, set[int]] = {}
+    for row in existing_rows:
+        existing_by_offer.setdefault(row["job_offer_id"], set()).add(int(row["chunk_index"]))
+
+    eligible: list[tuple[dict, list[dict]]] = []
     insufficient = 0
     excluded = 0
     for offer in offers:
-        if offer["id"] in already:
-            continue
         metadata = offer.get("raw_metadata") or {}
         if metadata.get("evaluation_filter"):
             excluded += 1
@@ -171,71 +239,179 @@ def build_job_chunks(client: Any, *, user_id: str, limit: int = 100) -> dict:
         description = (offer.get("description") or "").strip()
         if len(description) < 150:
             insufficient += 1
-            client.table("job_offers").update({
-                "raw_metadata": {**metadata, "processing": {
-                    "status": "needs_description", "reason": "Descripción insuficiente para evaluación fiable."
-                }}
-            }).eq("id", offer["id"]).eq("user_id", user_id).execute()
+            if metadata.get("processing", {}).get("status") != "needs_description":
+                client.table("job_offers").update({
+                    "raw_metadata": {**metadata, "processing": {
+                        "status": "needs_description",
+                        "reason": "Descripción insuficiente para evaluación fiable."
+                    }}
+                }).eq("id", offer["id"]).eq("user_id", user_id).execute()
             continue
-        eligible.append(offer)
-    pending = eligible[:limit]
-    for offer in pending:
-        chunks = chunk_job_description(offer["title"], offer["description"])
-        if not chunks:
-            insufficient += 1
-            continue
-        for chunk in chunks:
-            chunk_rows.append({**chunk, "user_id": user_id, "job_offer_id": offer["id"]})
+        chunks = chunk_job_description(offer["title"], description)
+        present = existing_by_offer.get(offer["id"], set())
+        missing = [chunk for chunk in chunks if int(chunk["chunk_index"]) not in present]
+        if missing:
+            eligible.append((offer, missing))
+
+    # Priorizar localmente cargos y contexto minero; no se descartan ofertas por esta puntuación.
+    eligible.sort(key=lambda item: (_local_relevance_score(item[0]), item[0].get("captured_at") or ""), reverse=True)
+    eligible = eligible[:max(1, int(limit))]
+    selected: list[tuple[dict, list[dict]]] = []
+    chunk_rows: list[dict] = []
+    for offer, missing in eligible:
+        if len(chunk_rows) >= budget_remaining:
+            break
+        allowed = missing[: budget_remaining - len(chunk_rows)]
+        if allowed:
+            selected.append((offer, allowed))
+            chunk_rows.extend({
+                **chunk, "user_id": user_id, "job_offer_id": offer["id"]
+            } for chunk in allowed)
+
     if not chunk_rows:
-        return {"offers_seen": len(offers), "offers_chunked": 0, "chunks_saved": 0,
-                "insufficient": insufficient, "excluded": excluded,
-                "eligible_pending": max(0, len(eligible) - len(pending))}
-    vectors = embed_texts(
-        [row["content"] for row in chunk_rows], api_key=settings.gemini_api_key,
-        model=settings.embedding_model, task_type="RETRIEVAL_DOCUMENT",
-    )
-    rows = []
-    for row, vector in zip(chunk_rows, vectors):
-        rows.append({
-            "user_id": row["user_id"], "job_offer_id": row["job_offer_id"],
-            "chunk_index": row["chunk_index"], "content": row["content"],
-            "embedding_model": settings.embedding_model, "embedding": vector,
-        })
-    for start in range(0, len(rows), 100):
+        return {
+            **empty, "insufficient": insufficient, "excluded": excluded,
+            "eligible_pending": len(eligible),
+            "budget_exhausted": bool(eligible) and budget_remaining == 0,
+        }
+
+    embedded_so_far = 0
+
+    def persist_batch(start_index: int, batch_texts: list[str], vectors: list[list[float]]) -> None:
+        nonlocal embedded_so_far
+        rows = []
+        for offset, vector in enumerate(vectors):
+            source = chunk_rows[start_index + offset]
+            rows.append({
+                "user_id": user_id, "job_offer_id": source["job_offer_id"],
+                "chunk_index": source["chunk_index"], "content": source["content"],
+                "embedding_model": settings.embedding_model, "embedding": vector,
+            })
         client.table("job_chunks").upsert(
-            rows[start:start + 100], on_conflict="job_offer_id,chunk_index"
+            rows, on_conflict="job_offer_id,chunk_index"
         ).execute()
-    return {"offers_seen": len(offers), "offers_chunked": len(pending),
-            "chunks_saved": len(rows), "insufficient": insufficient,
-            "excluded": excluded, "eligible_pending": max(0, len(eligible) - len(pending))}
+        # Actualizar memoria local para que el resultado cuente únicamente lo confirmado.
+        for row in rows:
+            existing_by_offer.setdefault(row["job_offer_id"], set()).add(int(row["chunk_index"]))
+        embedded_so_far += len(rows)
+        if on_progress:
+            on_progress({
+                "chunks_saved": embedded_so_far,
+                "chunks_total": len(chunk_rows),
+                "embedding_batch": start_index // 90 + 1,
+            })
+
+    embed_texts(
+        [row["content"] for row in chunk_rows],
+        api_key=settings.gemini_api_key,
+        model=settings.embedding_model,
+        task_type="RETRIEVAL_DOCUMENT",
+        on_batch=persist_batch,
+    )
+
+    complete = 0
+    for offer, _ in selected:
+        expected = {int(chunk["chunk_index"]) for chunk in chunk_job_description(
+            offer["title"], offer["description"]
+        )}
+        if expected.issubset(existing_by_offer.get(offer["id"], set())):
+            complete += 1
+
+    chunks_saved = len(chunk_rows)
+    used_after = used_today + chunks_saved
+    eligible_pending = max(0, len(eligible) - complete)
+    return {
+        "offers_seen": len(offers), "offers_chunked": complete,
+        "chunks_saved": chunks_saved, "insufficient": insufficient,
+        "excluded": excluded, "eligible_pending": eligible_pending,
+        "budget_exhausted": eligible_pending > 0 and used_after >= daily_chunk_limit,
+        "budget_remaining": max(0, daily_chunk_limit - used_after),
+        "chunks_embedded_last_24h": used_after,
+    }
 
 
-def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
+def evaluate_top_offers(
+    client: Any, *, user_id: str, top_k: int = 35,
+    on_progress: Callable[[dict], None] | None = None,
+    should_cancel: Callable[[], bool] | None = None,
+) -> dict:
     """Evalúa con Gemini solo el top semántico y ofertas aún no evaluadas con el CV activo."""
     settings = get_settings()
     if not settings.gemini_api_key:
         raise ValueError("Falta GEMINI_API_KEY en .env.")
+    daily_evaluation_limit = max(1, int(settings.max_daily_evaluations))
+    recent_rows = (client.table("evaluations").select("id").eq("user_id", user_id)
+                   .gte("evaluated_at", _rolling_budget_start())
+                   .limit(daily_evaluation_limit).execute().data or [])
+    daily_remaining = max(0, daily_evaluation_limit - len(recent_rows))
+    if daily_remaining == 0:
+        pending = client.rpc(
+            "rank_job_offers_by_cv", {"match_limit": 1}
+        ).execute().data or []
+        return {
+            "ranked": 0, "evaluated": 0, "below_threshold": 0,
+            "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
+            "skipped_existing": 0, "skipped_excluded": 0,
+            "errors": [], "results": [], "budget_exhausted": bool(pending),
+            "budget_remaining": 0,
+        }
     cv_rows = (client.table("cv_versions").select("*").eq("user_id", user_id)
                .eq("is_active", True).limit(1).execute().data or [])
     if not cv_rows:
         raise ValueError("Primero debe procesar su CV.")
     cv_version = cv_rows[0]
-    ranked = client.rpc("rank_job_offers_by_cv", {"match_limit": max(1, min(top_k, 100))}).execute().data or []
+    cv_chunk_rows = (client.table("cv_chunks").select("chunk_id,section,content")
+                     .eq("user_id", user_id).eq("cv_version_id", cv_version["id"])
+                     .limit(500).execute().data or [])
+    skills_profile = derive_skills_profile(cv_chunk_rows)
+    ranked = client.rpc("rank_job_offers_by_cv", {
+        "match_limit": max(1, min(int(top_k), daily_remaining, daily_evaluation_limit))
+    }).execute().data or []
+    ranking_diagnostic = None
+    if not ranked:
+        chunk_probe = (
+            client.table("job_chunks").select("id")
+            .eq("user_id", user_id).limit(1).execute().data or []
+        )
+        ranking_diagnostic = (
+            "El ranking semántico devolvió cero candidatos aunque existen fragmentos de ofertas. "
+            "Revise el contexto de autenticación del RPC rank_job_offers_by_cv."
+            if chunk_probe else
+            "No hay fragmentos semánticos de ofertas disponibles para evaluar. "
+            "La preparación está pendiente o alcanzó su presupuesto diario."
+        )
     stats = {"ranked": len(ranked), "evaluated": 0, "below_threshold": 0,
              "minimum_affinity_score": MINIMUM_AFFINITY_SCORE,
              "skipped_existing": 0, "skipped_excluded": 0,
-             "errors": [], "results": []}
-    for candidate in ranked:
+             "errors": [ranking_diagnostic] if ranking_diagnostic else [],
+             "results": [], "review_results": [], "budget_exhausted": False,
+             "budget_remaining": daily_remaining, "api_quota_paused": False,
+             "api_quota_message": None, "retry_after_seconds": None}
+    def notify_evaluation(processed: int) -> None:
+        if on_progress:
+            on_progress({
+                "offers_processed": processed,
+                "offers_total": len(ranked),
+                "evaluated": stats["evaluated"],
+                "errors": len(stats["errors"]),
+            })
+
+    for candidate_index, candidate in enumerate(ranked, start=1):
+        if should_cancel and should_cancel():
+            stats["cancelled"] = True
+            break
         offer_id = candidate["job_offer_id"]
         previous = (client.table("evaluations").select("id")
                     .eq("user_id", user_id).eq("job_offer_id", offer_id)
                     .eq("cv_version_id", cv_version["id"]).limit(1).execute().data or [])
         if previous:
             stats["skipped_existing"] += 1
+            notify_evaluation(candidate_index)
             continue
         offer_rows = (client.table("job_offers").select("*").eq("id", offer_id)
                       .eq("user_id", user_id).limit(1).execute().data or [])
         if not offer_rows:
+            notify_evaluation(candidate_index)
             continue
         offer = offer_rows[0]
         reason = _excluded_reason(offer)
@@ -247,9 +423,10 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "raw_metadata": {**metadata, "evaluation_filter": reason}
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["skipped_excluded"] += 1
+            notify_evaluation(candidate_index)
             continue
         evidence_rows = (client.rpc("retrieve_cv_evidence_for_offer", {
-            "target_job_offer_id": offer_id, "match_count": 10
+            "target_job_offer_id": offer_id, "match_count": CV_EVIDENCE_MATCH_COUNT
         }).execute().data or [])
         evidence = [{
             "chunk_id": row["chunk_id"], "section": row["section"],
@@ -257,24 +434,46 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
         } for row in evidence_rows]
         if not evidence:
             stats["errors"].append(f"{offer.get('title')}: no se recuperó evidencia CV.")
+            notify_evaluation(candidate_index)
             continue
         try:
+            description = (offer.get("description") or "").strip()
+            if len(description) > MAX_EVALUATION_DESCRIPTION_CHARS:
+                description = (
+                    description[:8000]
+                    + "\n\n[Se omitió una sección intermedia extensa para controlar el consumo de tokens.]\n\n"
+                    + description[-2000:]
+                )
+            evaluation_offer = {
+                key: offer.get(key)
+                for key in (
+                    "title", "company", "location", "employment_type",
+                    "salary_text", "source", "source_url", "published_at", "job_hash",
+                )
+                if offer.get(key) is not None
+            }
+            evaluation_offer["description"] = description
             run = evaluate_offer(
-                offer,
+                evaluation_offer,
                 {"cv_hash": cv_version["cv_hash"],
                  "filename": cv_version.get("source_filename"),
                  "page_count": cv_version.get("page_count"),
                  "char_count": cv_version.get("char_count"),
-                 "target_strategy": TARGET_STRATEGY},
+                 "target_strategy": TARGET_STRATEGY,
+                 "skills_profile": skills_profile},
                 evidence,
-            )
-            saved = save_evaluation(
-                client, user_id=user_id, offer_id=offer_id,
-                cv_version_id=cv_version["id"], run=run,
             )
             evaluation = run["evaluation"]
             affinity = int(evaluation["score_match"])
             priority = _priority_score(affinity, sector)
+            salary_analysis = analyse_salary(offer.get("salary_text"))
+            opportunity_score = attractiveness_score(affinity, salary_analysis)
+            evaluation["salary_assessment"] = salary_analysis["label"]
+            evaluation["salary_preference"] = salary_analysis
+            saved = save_evaluation(
+                client, user_id=user_id, offer_id=offer_id,
+                cv_version_id=cv_version["id"], run=run,
+            )
             metadata = offer.get("raw_metadata") or {}
             metadata["semantic_preselection"] = {
                 "similarity": candidate.get("semantic_score"),
@@ -287,52 +486,109 @@ def evaluate_top_offers(client: Any, *, user_id: str, top_k: int = 35) -> dict:
                 "strengths": evaluation.get("strengths", []),
                 "gaps": evaluation.get("gaps", []),
                 "role_detected": evaluation.get("role_detected"),
+                "salary_preference": salary_analysis,
+                "attractiveness_score": opportunity_score,
             }
             client.table("job_offers").update({
                 "affinity_score": affinity, "priority_score": priority,
                 "sector_category": sector, "raw_metadata": metadata,
             }).eq("id", offer_id).eq("user_id", user_id).execute()
             stats["evaluated"] += 1
+            notify_evaluation(candidate_index)
             if not meets_affinity_threshold(affinity):
-                # Se conserva la evaluación para trazabilidad, pero no se presenta
-                # como recomendación ni vuelve a consumir Gemini.
+                # Se conserva para la bandeja de revisión; el umbral no elimina oportunidades.
                 stats["below_threshold"] += 1
+                if affinity >= MANUAL_REVIEW_MINIMUM_SCORE:
+                    stats.setdefault("review_results", []).append({
+                        "id": offer_id, "title": offer["title"], "company": offer.get("company"),
+                        "source_url": offer.get("source_url"), "affinity_score": affinity,
+                        "priority_score": priority, "attractiveness_score": opportunity_score,
+                        "salary_preference": salary_analysis,
+                        "sector_category": sector, "verdict": evaluation["verdict"],
+                    })
                 continue
             stats["results"].append({
                 "id": offer_id, "title": offer["title"], "company": offer.get("company"),
                 "source_url": offer.get("source_url"), "affinity_score": affinity,
-                "priority_score": priority, "sector_category": sector,
-                "verdict": evaluation["verdict"],
+                "priority_score": priority, "attractiveness_score": opportunity_score,
+                "salary_preference": salary_analysis,
+                "sector_category": sector, "verdict": evaluation["verdict"],
                 "semantic_similarity": candidate.get("semantic_score"),
             })
+        except GeminiEvaluationDeferred as exc:
+            stats["api_quota_paused"] = True
+            stats["api_quota_message"] = str(exc)
+            stats["retry_after_seconds"] = exc.retry_after_seconds
+            logger.warning("Evaluación pausada por cuota Gemini: %s", exc)
+            notify_evaluation(candidate_index)
+            break
         except Exception as exc:
             logger.exception("Falló evaluación de oferta %s", offer_id)
             stats["errors"].append(f"{offer.get('title')}: {type(exc).__name__}: {exc}")
+            notify_evaluation(candidate_index)
     # La compatibilidad profesional manda; el sector solo desempata.
     stats["results"].sort(
-        key=lambda item: (item["affinity_score"], item["priority_score"]),
+        key=lambda item: (item.get("attractiveness_score", item["affinity_score"]), item["affinity_score"], item["priority_score"]),
         reverse=True,
     )
+    stats["review_results"].sort(
+        key=lambda item: (item.get("attractiveness_score", item["affinity_score"]), item["affinity_score"]),
+        reverse=True,
+    )
+    stats["budget_remaining"] = max(0, daily_remaining - stats["evaluated"])
+    if stats["budget_remaining"] == 0:
+        # Consulta pgvector/SQL sin Gemini para distinguir cuota agotada de trabajo terminado.
+        pending = client.rpc(
+            "rank_job_offers_by_cv", {"match_limit": 1}
+        ).execute().data or []
+        stats["budget_exhausted"] = bool(pending)
     return stats
 
 
 
 def get_processing_status(client: Any, *, user_id: str) -> dict:
-    """Cuenta ofertas NUEVA aptas, procesadas y pendientes de fragmentación."""
+    """Calcula pendientes reales por chunk y el presupuesto de embeddings disponible."""
     offers = (client.table("job_offers").select("id,title,company,description,raw_metadata")
               .eq("user_id", user_id).eq("lifecycle_status", "NUEVA")
               .limit(2000).execute().data or [])
-    offer_ids = {row["id"] for row in offers}
-    chunk_rows = (client.table("job_chunks").select("job_offer_id")
-                  .eq("user_id", user_id).limit(20000).execute().data or [])
-    chunked_ids = {row["job_offer_id"] for row in chunk_rows if row["job_offer_id"] in offer_ids}
-    eligible = [row for row in offers if not (row.get("raw_metadata") or {}).get("evaluation_filter")
+    offer_ids = [row["id"] for row in offers]
+    chunk_rows = []
+    for start in range(0, len(offer_ids), 100):
+        chunk_rows.extend(
+            client.table("job_chunks").select("job_offer_id,chunk_index")
+            .eq("user_id", user_id).in_("job_offer_id", offer_ids[start:start + 100])
+            .execute().data or []
+        )
+    present: dict[str, set[int]] = {}
+    for row in chunk_rows:
+        present.setdefault(row["job_offer_id"], set()).add(int(row["chunk_index"]))
+
+    eligible = [row for row in offers
+                if not (row.get("raw_metadata") or {}).get("evaluation_filter")
                 and not _excluded_reason(row)]
-    eligible_ids = {row["id"] for row in eligible if len((row.get("description") or "").strip()) >= 150}
+    pending = 0
+    complete = 0
+    needs_description = 0
+    for row in eligible:
+        description = (row.get("description") or "").strip()
+        if len(description) < 150:
+            needs_description += 1
+            continue
+        expected = {int(chunk["chunk_index"]) for chunk in chunk_job_description(
+            row["title"], description
+        )}
+        if expected.issubset(present.get(row["id"], set())):
+            complete += 1
+        else:
+            pending += 1
+
+    chunks_used = _daily_chunk_usage(client, user_id=user_id)
     return {
         "new_offers": len(offers),
-        "chunked_offers": len(chunked_ids),
-        "pending_chunking": len(eligible_ids - chunked_ids),
-        "needs_description": sum(1 for row in eligible if len((row.get("description") or "").strip()) < 150),
+        "chunked_offers": complete,
+        "pending_chunking": pending,
+        "needs_description": needs_description,
         "excluded_by_preferences": len(offers) - len(eligible),
+        "chunks_embedded_last_24h": chunks_used,
+        "daily_chunk_budget_remaining": max(0, int(get_settings().max_daily_job_chunks) - chunks_used),
     }

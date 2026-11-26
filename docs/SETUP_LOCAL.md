@@ -16,7 +16,7 @@ En Windows, active el entorno con `.venv\\Scripts\\activate`.
 - `GEMINI_API_KEY`: clave de Google AI Studio.
 - `SUPABASE_URL`: URL del proyecto Radar Empleos 2.0.
 - `SUPABASE_KEY`: publishable key (o anon legacy) del proyecto nuevo. Nunca use `service_role` ni secret key en la aplicación.
-- `CV_PDF_PATH`: ruta local al PDF del CV.
+- `CV_PDF_PATH`: opcional; la aplicación actual usa carga de PDF desde el navegador.
 
 No suba `.env` ni el PDF al repositorio.
 
@@ -30,7 +30,7 @@ En Supabase Dashboard > Authentication > Providers, confirme que Email esté hab
 streamlit run app.py
 ```
 
-La aplicación permite crear una cuenta o iniciar sesión. Luego, **Procesar mi CV** lee el PDF local, calcula SHA-256, crea fragmentos y embeddings Gemini y guarda texto/embeddings en el proyecto independiente. El archivo PDF binario no se carga. En **Evaluar una oferta laboral**, pegue el cargo y descripción para recuperar evidencia semántica del CV, solicitar evaluación estructurada a Gemini y guardar el resultado en el historial.
+La aplicación permite crear una cuenta o iniciar sesión. Luego, **Procesar mi CV** recibe un PDF desde el navegador, calcula SHA-256, crea fragmentos y embeddings Gemini y guarda texto/embeddings en el proyecto independiente. El archivo binario se mantiene solo en memoria de la solicitud y en un temporal local que se elimina al finalizar. En **Evaluar una oferta laboral**, pegue el cargo y descripción para recuperar evidencia semántica del CV, solicitar evaluación estructurada a Gemini y guardar el resultado en el historial.
 
 ## Seguridad
 

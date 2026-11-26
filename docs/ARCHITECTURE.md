@@ -32,3 +32,7 @@ Se fija el modelo y dimensión en el manifiesto. Los embeddings de documentos us
 ## Estado
 
 La persistencia y recuperación tienen primeras implementaciones, pero la autenticación de la interfaz, la ingesta completa, las operaciones transaccionales y el benchmark continúan pendientes. No se debe tratar esta versión como despliegue productivo.
+
+
+## Perfil de competencias trazable — MVP
+La interfaz deriva un inventario de competencias desde los fragmentos de la versión activa del CV mediante una taxonomía determinística. Cada coincidencia conserva chunk, sección y extracto textual. El nivel solo se declara si aparece explícitamente junto a la competencia; no se infieren años ni seniority. El evaluador recibe este perfil como contexto adicional, pero debe contrastarlo con la evidencia recuperada para cada oferta.

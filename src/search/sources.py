@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hashlib
 import html
+import ipaddress
 import re
+import socket
 import unicodedata
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote_plus, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
 from bs4 import BeautifulSoup
@@ -21,6 +23,10 @@ HEADERS = {
     "Accept-Language": "es-CL,es;q=0.9,en;q=0.8",
 }
 TIMEOUT = 18
+DETAIL_TIMEOUT = 8
+DETAIL_ENRICHMENT_LIMIT = 4
+BNE_SEARCH_TIMEOUT = 12
+BNE_DETAIL_TIMEOUT = 6
 
 
 def clean_text(value: Any) -> str:
@@ -71,34 +77,118 @@ def normalize_offer(*, source: str, title: str, url: str, company: str = "",
     }
 
 
-def _request_get(url: str, **kwargs):
-    return requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kwargs)
-
-
-def search_jobspy(query: str, limit: int = 15, location: str = "Chile") -> list[dict]:
-    """LinkedIn, Indeed y Google Jobs a través de python-jobspy."""
-    from jobspy import scrape_jobs
-    frame = scrape_jobs(
-        site_name=["linkedin", "indeed", "google"], search_term=query,
-        location=location, results_wanted=limit, country_indeed="Chile",
-        linkedin_fetch_description=True,
+def _extract_published_at(container) -> str | None:
+    """Obtiene fechas explícitas de tarjetas HTML sin inferirlas desde el orden."""
+    if container is None:
+        return None
+    selectors = (
+        "time[datetime]", "time", "[data-date]", "[data-published]",
+        ".date", ".fecha", ".posted", ".publication-date",
     )
-    results = []
-    if frame is None or frame.empty:
-        return results
-    for row in frame.to_dict(orient="records"):
-        source = str(row.get("site") or row.get("source") or "jobspy").lower()
-        offer = normalize_offer(
-            source=source, title=row.get("title"), url=row.get("job_url") or row.get("link"),
-            company=row.get("company_name") or row.get("company"), location=row.get("location"),
-            description=row.get("description"), published_at=str(row.get("date_posted") or "") or None,
-            employment_type=row.get("job_type"), salary_text=row.get("min_amount") or row.get("salary"),
-            raw_metadata={"via": "python-jobspy"},
+    for selector in selectors:
+        element = container.select_one(selector)
+        if element is None:
+            continue
+        value = (
+            element.get("datetime") or element.get("data-date")
+            or element.get("data-published") or element.get_text(" ", strip=True)
         )
-        if offer:
-            results.append(offer)
+        if value:
+            return str(value).strip()
+    return None
+
+
+def _request_get(url: str, **kwargs):
+    timeout = kwargs.pop("timeout", TIMEOUT)
+    return requests.get(url, headers=HEADERS, timeout=timeout, **kwargs)
+
+
+def search_jobspy_site(query: str, *, site: str, limit: int = 15,
+                       location: str = "Chile") -> list[dict]:
+    """Consulta un portal JobSpy; Indeed se busca en Chile y Antofagasta.
+
+    Las descripciones se recuperan para Indeed/Glassdoor porque el filtro de
+    pertinencia necesita funciones y requisitos, no solo el título. LinkedIn
+    mantiene la descarga desactivada para reducir solicitudes sobre un portal
+    que ya aplica bloqueos.
+    """
+    if site not in {"linkedin", "indeed", "glassdoor"}:
+        raise ValueError(f"Portal JobSpy no soportado: {site}")
+
+    from jobspy import scrape_jobs
+
+    locations = [location, "Antofagasta, Chile"] if site == "indeed" and location == "Chile" else [location]
+    results = []
+    errors_seen = []
+    seen = set()
+    for search_location in dict.fromkeys(locations):
+        frame = scrape_jobs(
+            site_name=[site],
+            search_term=query,
+            location=search_location,
+            results_wanted=limit,
+            hours_old=336,
+            country_indeed="Chile",
+            fetch_description=site in {"indeed", "glassdoor"},
+            verbose=0,
+        )
+        if frame is None:
+            continue
+
+        attrs = getattr(frame, "attrs", {}) or {}
+        errors = attrs.get("errors", {}) or {}
+        if errors.get(site):
+            error = str(errors[site])
+            errors_seen.append(f"{search_location}: {error}")
+            # Un bloqueo explícito no se debe insistir desde la misma IP.
+            if "429" in error or "403" in error:
+                break
+            continue
+
+        if frame.empty:
+            continue
+
+        for row in frame.to_dict(orient="records"):
+            source = str(row.get("site") or row.get("source") or site).lower()
+            offer = normalize_offer(
+                source=source,
+                title=row.get("title"),
+                url=row.get("job_url") or row.get("link"),
+                company=row.get("company_name") or row.get("company"),
+                location=row.get("location") or search_location,
+                description=row.get("description"),
+                published_at=str(row.get("date_posted") or "") or None,
+                employment_type=row.get("job_type"),
+                salary_text=row.get("min_amount") or row.get("salary"),
+                external_id=str(row.get("id") or ""),
+                raw_metadata={
+                    "via": "python-jobspy",
+                    "description_fetch_requested": site in {"indeed", "glassdoor"},
+                    "search_location": search_location,
+                },
+            )
+            if offer and offer["job_hash"] not in seen:
+                seen.add(offer["job_hash"])
+                results.append(offer)
+
+    if errors_seen and not results:
+        raise RuntimeError(f"JobSpy {site}: {'; '.join(errors_seen)}")
     return results
 
+
+def search_linkedin(query: str, limit: int = 15) -> list[dict]:
+    """Busca ofertas públicas de LinkedIn sin descargar cada página individual."""
+    return search_jobspy_site(query, site="linkedin", limit=limit)
+
+
+def search_indeed(query: str, limit: int = 15) -> list[dict]:
+    """Busca Indeed en Chile y refuerza la cobertura minera en Antofagasta."""
+    return search_jobspy_site(query, site="indeed", limit=limit)
+
+
+def search_glassdoor(query: str, limit: int = 15) -> list[dict]:
+    """Busca ofertas públicas de Glassdoor mediante JobSpy."""
+    return search_jobspy_site(query, site="glassdoor", limit=limit)
 
 def search_getonbrd(query: str, limit: int = 15) -> list[dict]:
     response = _request_get("https://www.getonbrd.com/api/v0/search/jobs",
@@ -129,7 +219,9 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
     response.raise_for_status()
     soup = BeautifulSoup(response.text, "html.parser")
     results = []
-    for card in soup.select("div.job-item, div.destacado, article")[:limit]:
+    # Evitar el fallback genérico a cualquier <article>: varias páginas incluyen
+    # artículos editoriales/recomendaciones que no son tarjetas de vacantes.
+    for card in soup.select("div.job-item, div.destacado")[:limit]:
         link = card.select_one("h2.title a, h3.title a, a[href*='/trabajo/']")
         if not link:
             continue
@@ -138,12 +230,12 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
         location = card.select_one(".city, .ciudad, a[href*='/ciudad/']")
         summary = card.select_one("p, .text, .description")
         description = summary.get_text(" ", strip=True) if summary else ""
-        if len(description) < 120 and url:
+        if len(description) < 120 and url and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
-                detail = _request_get(url)
+                detail = _request_get(url, timeout=DETAIL_TIMEOUT)
                 if detail.ok:
                     detail_soup = BeautifulSoup(detail.text, "html.parser")
-                    body = detail_soup.select_one(".job-description, .descripcion, article, .content")
+                    body = detail_soup.select_one(".job-description, .descripcion, [itemprop='description']")
                     if body:
                         description = body.get_text(" ", strip=True)
             except requests.RequestException:
@@ -152,7 +244,7 @@ def search_chiletrabajos(query: str, limit: int = 12) -> list[dict]:
             source="chiletrabajos", title=link.get_text(" ", strip=True), url=url,
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
-            description=description,
+            description=description, published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -183,6 +275,7 @@ def search_computrabajo(query: str, limit: int = 12) -> list[dict]:
             company=company.get_text(" ", strip=True) if company else "",
             location=location.get_text(" ", strip=True) if location else "Chile",
             description=summary.get_text(" ", strip=True) if summary else "",
+            published_at=_extract_published_at(card),
         )
         if offer:
             results.append(offer)
@@ -212,6 +305,7 @@ def search_contutalento(query: str, limit: int = 12) -> list[dict]:
         offer = normalize_offer(
             source="contutalento", title=title, url=url, company=company,
             location="Chile", description="",
+            published_at=_extract_published_at(heading.find_parent(["article", "li", "div"])),
             raw_metadata={"description_status": "pendiente de enriquecimiento"},
         )
         if offer:
@@ -225,7 +319,7 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
     headers = {**HEADERS, "Accept": "application/json, text/plain, */*", "Content-Type": "application/json"}
     response = requests.post(
         "https://www.bne.cl/api/ofertas/busqueda", params={"page": 0, "size": limit},
-        json={"textoBusqueda": query}, headers=headers, timeout=TIMEOUT,
+        json={"textoBusqueda": query}, headers=headers, timeout=BNE_SEARCH_TIMEOUT,
     )
     response.raise_for_status()
     results = []
@@ -236,10 +330,10 @@ def search_bne(query: str, limit: int = 12) -> list[dict]:
         employer, region, commune = item.get("empresario") or {}, item.get("region") or {}, item.get("comuna") or {}
         schedule = item.get("jornadaLaboral") or {}
         description = str(item.get("descripcion") or "")
-        if len(description) < 150:
+        if len(description) < 150 and len(results) < DETAIL_ENRICHMENT_LIMIT:
             try:
                 detail = requests.get(f"https://www.bne.cl/api/ofertas/publica/{offer_id}",
-                                      headers=headers, timeout=10)
+                                      headers=headers, timeout=BNE_DETAIL_TIMEOUT)
                 if detail.ok:
                     description = str(detail.json().get("descripcion") or description)
             except requests.RequestException:
@@ -271,6 +365,7 @@ def search_codelco(query: str, limit: int = 12) -> list[dict]:
             source="codelco", title=title, url=urljoin(base, link.get("href", "")),
             company="Codelco", location=row.get_text(" ", strip=True) if row else "Chile",
             description="",
+            published_at=_extract_published_at(row or link.parent),
         )
         if offer:
             results.append(offer)
@@ -304,9 +399,101 @@ def search_finning(query: str, limit: int = 12) -> list[dict]:
     return results
 
 
+def _validate_public_portal_url(url: str) -> str:
+    """Valida destinos HTTP(S) públicos y evita localhost/redes privadas."""
+    parts = urlsplit(str(url or "").strip())
+    if parts.scheme not in {"http", "https"} or not parts.hostname:
+        raise ValueError("La URL debe comenzar con https:// o http:// y tener un dominio válido.")
+    if parts.username or parts.password:
+        raise ValueError("No se permiten credenciales embebidas en la URL.")
+    host = parts.hostname.lower().rstrip(".")
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".local"):
+        raise ValueError("No se permiten direcciones locales o privadas.")
+    try:
+        addresses = {ipaddress.ip_address(host)}
+    except ValueError:
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+            }
+        except OSError as exc:
+            raise ValueError("No se pudo resolver el dominio del portal.") from exc
+    if not addresses or any(
+        address.is_private or address.is_loopback or address.is_link_local
+        or address.is_reserved or address.is_multicast or address.is_unspecified
+        for address in addresses
+    ):
+        raise ValueError("El portal debe estar alojado en un dominio público.")
+    return url
+
+
+def search_custom_portal(query: str, *, portal: dict, limit: int = 15) -> list[dict]:
+    """Lee una página pública de resultados configurada por el usuario.
+
+    La URL puede incluir {query}; si no lo incluye, se agrega el parámetro q.
+    Solo extrae enlaces y texto público del HTML; no inicia sesión ni evade CAPTCHA.
+    """
+    template = str(portal.get("url_template") or "").strip()
+    if "{query}" in template:
+        target = template.replace("{query}", quote_plus(str(query)))
+    else:
+        parts = urlsplit(template)
+        params = dict(parse_qsl(parts.query, keep_blank_values=True))
+        params["q"] = str(query)
+        target = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+    _validate_public_portal_url(target)
+    response = _request_get(target, timeout=TIMEOUT, allow_redirects=False)
+    if response.status_code in {301, 302, 303, 307, 308}:
+        raise ValueError("El portal redirigió la búsqueda; ingrese directamente su URL pública de resultados.")
+    response.raise_for_status()
+    _validate_public_portal_url(response.url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    results = []
+    seen = set()
+    for anchor in soup.select("a[href]"):
+        title = clean_text(anchor.get_text(" ", strip=True))
+        href = urljoin(response.url, anchor.get("href", ""))
+        parts = urlsplit(href)
+        if len(title) < 8 or len(title) > 180 or parts.scheme not in {"http", "https"}:
+            continue
+        if parts.netloc.lower() != urlsplit(response.url).netloc.lower():
+            continue
+        if href in seen or href.rstrip("/") == response.url.rstrip("/"):
+            continue
+        lowered = title.casefold()
+        if any(word in lowered for word in ("iniciar sesión", "registrarse", "contacto", "privacidad", "cookies")):
+            continue
+        seen.add(href)
+        container = anchor
+        for _ in range(3):
+            if getattr(container, "parent", None) is None:
+                break
+            container = container.parent
+            if len(clean_text(container.get_text(" ", strip=True))) >= 80:
+                break
+        text = clean_text(container.get_text(" ", strip=True))
+        description = text if len(text) >= 80 else title
+        offer = normalize_offer(
+            source=str(portal.get("id") or "custom"),
+            title=title, url=href,
+            company=str(portal.get("name") or "Portal personalizado"),
+            description=description,
+            published_at=_extract_published_at(container),
+            raw_metadata={"custom_portal": True, "portal_name": str(portal.get("name") or "")},
+        )
+        if offer:
+            results.append(offer)
+        if len(results) >= max(1, min(int(limit), 30)):
+            break
+    return results
+
+
 SOURCE_REGISTRY = {
-    "linkedin": ("LinkedIn", "jobspy"), "indeed": ("Indeed", "jobspy"),
-    "google": ("Google Jobs", "jobspy"), "getonbrd": ("Get on Board", "getonbrd"),
+    # Google Jobs se excluye: JobSpy 1.5.0 lo reporta actualmente no disponible.
+    "linkedin": ("LinkedIn", "linkedin"), "indeed": ("Indeed", "indeed"),
+    "glassdoor": ("Glassdoor", "glassdoor"),
+    "getonbrd": ("Get on Board", "getonbrd"),
     "chiletrabajos": ("Chiletrabajos", "chiletrabajos"),
     "computrabajo": ("Computrabajo", "computrabajo"),
     "contutalento": ("Con tu Talento", "contutalento"),
@@ -315,7 +502,9 @@ SOURCE_REGISTRY = {
     "finning": ("Finning Careers", "finning"),
 }
 CONNECTORS = {
-    "jobspy": search_jobspy, "getonbrd": search_getonbrd,
+    "linkedin": search_linkedin, "indeed": search_indeed,
+    "glassdoor": search_glassdoor,
+    "getonbrd": search_getonbrd,
     "chiletrabajos": search_chiletrabajos, "computrabajo": search_computrabajo,
     "contutalento": search_contutalento, "bne": search_bne,
     "codelco": search_codelco, "finning": search_finning,
