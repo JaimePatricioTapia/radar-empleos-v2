@@ -19,6 +19,8 @@ BUILTIN_PORTAL_DOMAINS = {
     "contutalento.cl": "Con Tu Talento",
     "bne.cl": "Bolsa Nacional de Empleo",
     "codelco.com": "Codelco Empleos",
+    "codelco.cl": "Codelco Empleos",
+    "empleospublicos.cl": "Empleos Públicos",
     "finning.com": "Finning Careers",
 }
 
@@ -67,10 +69,9 @@ def evaluate_portal_candidate(
         return {"approved": False, "reason": str(exc)}
 
     host = _host_key(template)
-    root = _registrable_host(host)
     builtins = builtin_domains or BUILTIN_PORTAL_DOMAINS
     for domain, label in builtins.items():
-        if root == domain or host == domain or host.endswith("." + domain):
+        if host == domain or host.endswith("." + domain):
             return {
                 "approved": False,
                 "duplicate": True,
@@ -81,7 +82,6 @@ def evaluate_portal_candidate(
         existing_host = _host_key(portal.get("url_template", ""))
         if existing_host and (
             existing_host == host
-            or _registrable_host(existing_host) == root
             or existing_host.endswith("." + host)
             or host.endswith("." + existing_host)
         ):
