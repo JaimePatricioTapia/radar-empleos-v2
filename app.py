@@ -19,6 +19,7 @@ from src.search.ingestion import DEFAULT_SOURCES, DEFAULT_TARGET_ROLES, DEFAULT_
 from src.search.processing import MINIMUM_AFFINITY_SCORE, MANUAL_REVIEW_MINIMUM_SCORE, classify_sector
 from src.search.task_runner import start_search_task
 from src.search.sources import SOURCE_REGISTRY
+from src.search.catalog_validation import evaluate_portal_candidate, validate_new_search_terms
 from src.search.role_families import derive_role_families
 from src.cv.skills_profile import derive_skills_profile
 
@@ -269,6 +270,8 @@ with st.sidebar:
         finally:
             st.session_state.radar_user = None
             st.session_state.pop("supabase_client", None)
+            st.session_state.pop("radar_portal_candidate", None)
+            st.session_state.pop("radar_term_validation_messages", None)
             st.rerun()
 
 # Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
@@ -366,24 +369,45 @@ with st.expander("＋ Administrar portales personalizados", expanded=False):
         "Los portales quedan guardados en su cuenta y estarán disponibles en futuras sesiones. "
         "Use una URL pública de resultados; puede insertar {query} donde deba ir el término."
     )
-    with st.form("radar_add_custom_portal", clear_on_submit=True):
+    with st.form("radar_add_custom_portal", clear_on_submit=False):
         custom_portal_name = st.text_input("Nombre del portal", placeholder="Ej.: Portal de empleos de una minera")
         custom_portal_url = st.text_input(
             "URL de búsqueda del portal",
             placeholder="https://sitio.cl/trabajos?buscar={query}",
-            help="Use resultados públicos; no se admite una página que requiera iniciar sesión.",
+            help="Debe ser una página pública de resultados. Puede insertar {query} donde va el término.",
         )
-        add_custom_portal = st.form_submit_button("Guardar portal")
-    if add_custom_portal:
-        try:
-            save_search_portal(
-                client, user_id=user["id"], name=custom_portal_name,
-                url_template=custom_portal_url,
-            )
-            st.success("Portal guardado en su cuenta.")
-            st.rerun()
-        except Exception as exc:
-            st.error(f"No se pudo guardar el portal: {type(exc).__name__}: {exc}")
+        evaluate_custom_portal = st.form_submit_button("Evaluar URL antes de incorporarla")
+    if evaluate_custom_portal:
+        result = evaluate_portal_candidate(
+            custom_portal_name, custom_portal_url, existing_portals=portal_rows,
+        )
+        st.session_state["radar_portal_candidate"] = {
+            "name": custom_portal_name.strip(),
+            "url": custom_portal_url.strip(),
+            "result": result,
+        }
+    candidate = st.session_state.get("radar_portal_candidate")
+    if candidate:
+        result = candidate.get("result", {})
+        if result.get("approved"):
+            st.success("Evaluación aprobada. " + result.get("reason", ""))
+            st.caption(f"Dominio comprobado: {result.get('host', '')} · HTTP {result.get('http_status', '')}")
+            if st.button("Aprobar e incorporar al stock «Portales y buscadores»", type="primary", key="approve_portal_candidate"):
+                try:
+                    save_search_portal(
+                        client, user_id=user["id"], name=candidate["name"],
+                        url_template=candidate["url"],
+                    )
+                    st.session_state.pop("radar_portal_candidate", None)
+                    st.success("Portal aprobado y guardado en su cuenta.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"No se pudo incorporar el portal: {type(exc).__name__}: {exc}")
+        else:
+            st.error("URL no aprobada: " + result.get("reason", "No superó la evaluación."))
+            if st.button("Descartar propuesta", key="discard_portal_candidate"):
+                st.session_state.pop("radar_portal_candidate", None)
+                st.rerun()
     if portal_rows:
         for portal in portal_rows:
             cols = st.columns([3, 5, 1, 1])
@@ -436,6 +460,41 @@ selected_functions = st.multiselect(
     placeholder="Ej.: continuidad operacional, control de KPI, levantamiento de requisitos",
     help="Busca por actividades concretas aunque el aviso use un nombre de cargo diferente.",
 )
+new_role_candidates = [
+    term for term in selected_roles
+    if term not in DEFAULT_TARGET_ROLES and term not in generated_roles and term not in saved_roles
+]
+new_function_candidates = [
+    term for term in selected_functions
+    if term not in DEFAULT_TARGET_FUNCTIONS and term not in saved_functions
+]
+if new_role_candidates or new_function_candidates:
+    st.caption("Los cargos y funciones escritos pueden usarse en esta búsqueda sin guardarlos. Para incorporarlos al stock persistente, primero se validan y luego usted los aprueba.")
+    if st.button("Evaluar y agregar cargos/funciones nuevos al stock", key="approve_search_terms"):
+        validation_messages = []
+        for term_type, candidates, existing in (
+            ("cargo", new_role_candidates, saved_roles),
+            ("funcion", new_function_candidates, saved_functions),
+        ):
+            checked = validate_new_search_terms(candidates, existing_terms=existing)
+            if checked["accepted"]:
+                inserted = save_search_terms(
+                    client, user_id=user["id"], term_type=term_type,
+                    terms=checked["accepted"],
+                )
+                validation_messages.append(f"{term_type.capitalize()}: {len(inserted)} incorporado(s).")
+            if checked["duplicates"]:
+                validation_messages.append(f"{term_type.capitalize()}: {len(checked['duplicates'])} duplicado(s) omitido(s).")
+            if checked["rejected"]:
+                validation_messages.extend(
+                    f"Rechazado «{item['term']}»: {item['reason']}" for item in checked["rejected"]
+                )
+        st.session_state["radar_term_validation_messages"] = validation_messages
+        st.rerun()
+
+for message in st.session_state.get("radar_term_validation_messages", []):
+    st.info(message)
+
 with st.expander("Administrar cargos y funciones guardados", expanded=False):
     if saved_terms:
         for term in saved_terms:
@@ -446,7 +505,7 @@ with st.expander("Administrar cargos y funciones guardados", expanded=False):
                 delete_search_term(client, user_id=user["id"], term_id=term["id"])
                 st.rerun()
     else:
-        st.caption("Los términos personalizados se guardarán al ejecutar una búsqueda.")
+        st.caption("Todavía no hay cargos o funciones personalizados aprobados.")
 role_context = [
     {
         "family_id": family["id"],
@@ -532,18 +591,8 @@ run_pipeline = st.button(
     use_container_width=True,
 )
 if run_pipeline:
-    try:
-        save_search_terms(
-            client, user_id=user["id"], term_type="cargo",
-            terms=[term for term in selected_roles if term not in DEFAULT_TARGET_ROLES],
-        )
-        save_search_terms(
-            client, user_id=user["id"], term_type="funcion",
-            terms=[term for term in selected_functions if term not in DEFAULT_TARGET_FUNCTIONS],
-        )
-    except Exception as exc:
-        st.error(f"No se pudieron guardar los términos personalizados: {type(exc).__name__}: {exc}")
-        st.stop()
+    # Los términos nuevos no se incorporan al catálogo por el solo hecho de usarlos.
+    # Solo los aprobados explícitamente desde el control anterior quedan persistidos.
     st.session_state.radar_search_task = start_search_task(
         client,
         user_id=user["id"],

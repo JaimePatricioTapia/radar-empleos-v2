@@ -532,3 +532,70 @@ La URL se valida en la aplicación antes de consultarse. El conector debe seguir
 | ID | Fecha | Requisitos | Decisión autorizada | Estado |
 |---|---|---|---|---|
 | CHG-2026-010 | 2026-11-25 | RF-048–RF-055, QA-058–QA-065 | El propietario autoriza crear tablas nuevas y políticas RLS en Supabase Radar 2.0 para persistir portales, cargos y funciones; Radar 1 y tablas existentes quedan fuera de alcance. | Esquema aplicado y verificado; integración de interfaz/código en rama de trabajo, pendiente CI y despliegue. |
+
+
+---
+
+## 18. Evaluación y aprobación previa del catálogo de búsqueda (CHG-2026-011)
+
+### 18.1 Objetivo
+
+Evitar que el stock persistente de «Portales y buscadores», «Cargos objetivo» y «Funciones y responsabilidades» se contamine con URLs repetidas, portales incompatibles o términos inválidos. Ningún elemento nuevo se incorpora al stock por el solo hecho de escribirlo o utilizarlo en una búsqueda.
+
+### 18.2 Portales personalizados
+
+| ID | Regla |
+|---|---|
+| RF-056 | Una URL nueva debe pasar por una etapa de evaluación previa; el formulario no debe guardarla directamente. |
+| RF-057 | La evaluación normaliza el host y detecta duplicados por dominio/portal, no solo por coincidencia literal de URL. Debe detectar variantes como www/no-www, subdominios y distintas rutas del mismo sitio. |
+| RF-058 | No se permite reincorporar como portal personalizado un dominio que ya corresponda a una fuente integrada del Radar. |
+| RF-059 | La prueba debe realizar una consulta pública de ejemplo y comprobar respuesta HTTP satisfactoria, contenido HTML, enlaces y señales de resultados de empleo. |
+| RF-060 | Se rechazan redirecciones, errores HTTP, bloqueos 401/403/407/429, CAPTCHA, controles anti-automatización, dominios privados/locales y páginas sin señales de búsqueda laboral. No se intentará evadir bloqueos. |
+| RF-061 | Si la evaluación falla, la URL no se guarda ni se agrega a la lista seleccionable. Se informa el motivo concreto para corregirla o descartarla. |
+| RF-062 | Solo después de una evaluación aprobada y una acción explícita del usuario «Aprobar e incorporar» se persiste la URL en el stock «Portales y buscadores». |
+| RF-063 | La capa de persistencia debe volver a comprobar duplicados por dominio para impedir duplicados aunque se omita la interfaz. |
+
+La prueba automática confirma compatibilidad básica de la URL y su página pública en el momento de la evaluación. No garantiza que el portal mantenga su estructura ni que todos sus filtros funcionen; la búsqueda debe seguir registrando errores por fuente.
+
+### 18.3 Cargos y funciones
+
+| ID | Regla |
+|---|---|
+| RF-064 | Los cargos y funciones escritos por el usuario se consideran propuestas y no se guardan automáticamente al ejecutar una búsqueda. |
+| RF-065 | Antes de incorporarlos al stock, el Radar normaliza espacios/mayúsculas, comprueba longitud y rechaza entradas que sean URLs, correos o texto con formato no válido. |
+| RF-066 | Se comparan con el stock del mismo tipo y se omiten duplicados aunque cambien mayúsculas o espacios. Cargo y función son catálogos separados. |
+| RF-067 | El usuario puede utilizar una propuesta en la búsqueda actual sin incorporarla al stock; solo la acción explícita de aprobación la persiste para sesiones futuras. |
+| RF-068 | Tras la aprobación, el nuevo cargo aparece en «Cargos objetivo» y la nueva función en «Funciones y responsabilidades» en futuras sesiones. |
+
+### 18.4 Interfaz y trazabilidad
+
+- El formulario de portal cambia «Guardar portal» por «Evaluar URL antes de incorporarla».
+- La evaluación muestra aprobado/rechazado, dominio, estado HTTP y explicación.
+- Solo una evaluación aprobada habilita «Aprobar e incorporar al stock».
+- El usuario puede descartar una propuesta rechazada; nunca se conserva como portal activo.
+- Para cargos y funciones se ofrece «Evaluar y agregar cargos/funciones nuevos al stock», mostrando incorporados, duplicados omitidos y rechazados.
+- Las propuestas no aprobadas siguen utilizables en la búsqueda que el usuario está configurando, pero no reaparecen automáticamente en sesiones futuras.
+
+### 18.5 Seguridad y alcance de base de datos
+
+Esta mejora reutiliza las tablas y políticas RLS existentes `user_search_portals` y `user_search_terms`. No requiere nuevas tablas, columnas, políticas, funciones SQL ni cambios de datos existentes. La validación de URLs usa el conector público existente, respeta bloqueos y no solicita credenciales del portal.
+
+### 18.6 Pruebas de aceptación
+
+| ID prueba | Escenario | Resultado esperado |
+|---|---|---|
+| QA-066 | URL pública con resultados laborales | Se aprueba la evaluación, pero solo se guarda tras confirmación explícita. |
+| QA-067 | Misma web con www/no-www o ruta diferente | Se detecta el mismo portal y no se crea un segundo registro. |
+| QA-068 | URL de un portal ya integrado | Se rechaza como duplicada. |
+| QA-069 | HTTP 403/429, redirección o timeout | No se guarda y se informa el problema; no se intenta evadir el bloqueo. |
+| QA-070 | CAPTCHA o página sin resultados laborales | Se rechaza y no aparece en el selector de portales. |
+| QA-071 | Cargo/función con diferencias de mayúsculas y espacios | Se detecta como duplicado. |
+| QA-072 | URL o correo ingresado como cargo | Se rechaza como término inválido. |
+| QA-073 | Cargo nuevo aprobado | Se incorpora al stock y reaparece en la próxima sesión. |
+| QA-074 | Cargo nuevo usado sin aprobar | Se utiliza en la búsqueda actual, pero no se persiste. |
+
+### 18.7 Registro de cambio
+
+| ID | Fecha | Requisitos | Decisión | Estado |
+|---|---|---|---|---|
+| CHG-2026-011 | 2026-11-26 | RF-056–RF-068, QA-066–QA-074 | El propietario solicita evaluar URLs y términos antes de incorporarlos al stock, impedir portales repetidos o incompatibles y requerir aprobación explícita. | Implementación en rama feature/validated-search-catalogs; pendiente CI, revisión y PR. |
