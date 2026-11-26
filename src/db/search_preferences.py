@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 
 def load_search_preferences(client: Any, *, user_id: str) -> dict:
@@ -29,10 +30,26 @@ def save_search_portal(client: Any, *, user_id: str, name: str, url_template: st
         raise ValueError("La URL debe comenzar con http:// o https://.")
     existing = (
         client.table("user_search_portals").select("*")
-        .eq("user_id", user_id).eq("url_template", url_template).limit(1).execute().data or []
+        .eq("user_id", user_id).execute().data or []
     )
-    if existing:
-        return existing[0]
+    def host_key(value: str) -> str:
+        host = (urlsplit(str(value or "")).hostname or "").lower().rstrip(".")
+        return host[4:] if host.startswith("www.") else host
+    candidate_host = host_key(url_template)
+    for portal in existing:
+        saved_host = host_key(portal.get("url_template", ""))
+        same_site = bool(candidate_host and saved_host and (
+            candidate_host == saved_host
+            or candidate_host.endswith("." + saved_host)
+            or saved_host.endswith("." + candidate_host)
+        ))
+        if same_site:
+            if portal.get("url_template") == url_template:
+                return portal
+            raise ValueError(
+                f"El dominio ya está registrado como «{portal.get('name', 'Portal existente')}». "
+                "No se permite agregar otra URL del mismo portal."
+            )
     response = client.table("user_search_portals").insert({
         "user_id": user_id, "name": name, "url_template": url_template, "enabled": True,
     }).execute()
