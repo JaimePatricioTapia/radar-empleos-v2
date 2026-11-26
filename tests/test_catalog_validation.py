@@ -68,7 +68,7 @@ def test_portal_candidate_rejects_captcha(monkeypatch):
     monkeypatch.setattr(validation.sources, "_validate_public_portal_url", lambda _url: _url)
     monkeypatch.setattr(
         validation.sources, "_request_get",
-        lambda *_a, **_k: _response(body="<html><body>Verify you are human CAPTCHA</body></html>"),
+        lambda *_a, **_k: _response(body="<html><body><h1>Verify you are human CAPTCHA</h1>" + (" security check" * 60) + "</body></html>"),
     )
     result = validation.evaluate_portal_candidate(
         "Portal con captcha", "https://jobs.example.cl/search?q={query}",
