@@ -270,6 +270,8 @@ with st.sidebar:
         finally:
             st.session_state.radar_user = None
             st.session_state.pop("supabase_client", None)
+            st.session_state.pop("radar_portal_candidate", None)
+            st.session_state.pop("radar_term_validation_messages", None)
             st.rerun()
 
 # Perfil ocupacional derivado de fragmentos ya almacenados del CV activo.
