@@ -12,7 +12,7 @@ def _response(status=200, body=None, url="https://jobs.example.cl/search?q=Anali
         <html><head><title>Empleos</title></head><body>
           <h1>Resultados para Analista</h1>
           <div class="job"><a href="/jobs/123">Analista de Proyectos TI</a>
-          <p>Oferta de trabajo publicada</p></div>
+          <p>Oferta de trabajo publicada con requisitos, funciones y experiencia para una posición profesional.</p><p>Revise los detalles de la vacante y postule desde el sitio web.</p></div>
         </body></html>
         """,
         raise_for_status=lambda: (_ for _ in ()).throw(RuntimeError("HTTP error")) if status >= 400 else None,
