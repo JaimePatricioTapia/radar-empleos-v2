@@ -22,7 +22,8 @@ def _setting(name: str, default=None):
 @dataclass(frozen=True)
 class Settings:
     gemini_api_key: str | None = _setting("GEMINI_API_KEY")
-    # El evaluador aplica una prioridad fija de modelos para aprovechar cuotas Lite.
+    # Variable heredada por compatibilidad; el evaluador aplica su propia prioridad fija.
+    gemini_model: str = _setting("GEMINI_MODEL", "gemini-3.5-flash-lite")
     embedding_model: str = _setting("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
     embedding_dimensions: int = int(_setting("GEMINI_EMBEDDING_DIMENSIONS", "3072"))
     # Topes conservadores para operación gratuita. Los secretos pueden reducirlos,
