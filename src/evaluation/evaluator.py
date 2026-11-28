@@ -1,4 +1,4 @@
-"""Evaluador Gemini con salida validada y trazabilidad de ejecución."""
+"""Evaluador Gemini con salida validada, fallback ordenado y trazabilidad."""
 from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,7 +15,13 @@ from src.cv.embeddings import _is_retryable_error, _retry_delay_seconds
 logger = logging.getLogger(__name__)
 
 PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "evaluator_system.md"
-FALLBACK_MODEL = "gemini-3.8-flash"
+MODEL_PRIORITY = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+)
+FALLBACK_MODEL = MODEL_PRIORITY[0]  # Compatibilidad con imports existentes.
 MAX_INLINE_RETRY_DELAY_SECONDS = 60
 
 
@@ -54,12 +60,21 @@ def _daily_quota_retry_seconds(message: str) -> float | None:
 
 
 def _is_unavailable_model_error(exc: Exception) -> bool:
-    """Detecta el 404 explícito de un modelo retirado/no habilitado."""
+    """Detecta un 404 que indica que el modelo no existe o no está habilitado."""
     message = str(exc).lower()
-    return (
-        ("404" in message or "not_found" in message)
-        and ("no longer available" in message or "retired" in message)
+    return ("404" in message or "not_found" in message) and any(
+        marker in message for marker in (
+            "no longer available", "retired", "not found", "not supported",
+            "is not available", "model is unavailable",
+        )
     )
+
+
+def _model_attempt_order(model: str | None) -> tuple[str, ...]:
+    """Usa la prioridad solicitada; un override explícito se prueba primero."""
+    if not model:
+        return MODEL_PRIORITY
+    return (model,) + tuple(candidate for candidate in MODEL_PRIORITY if candidate != model)
 
 
 def evaluate_offer(
@@ -70,10 +85,11 @@ def evaluate_offer(
     client=None,
     model: str | None = None,
 ) -> dict:
-    """Evalúa una oferta contra perfil y evidencia recuperada.
+    """Evalúa una oferta y cambia de modelo ante cuota o indisponibilidad.
 
-    La recuperación semántica se ejecuta fuera de esta función para poder
-    probar el evaluador con evidencia controlada y reproducible.
+    Los errores transitorios breves se reintentan en el mismo modelo. Si la
+    cuota diaria o el rate limit exige una espera extensa, se prueba el siguiente
+    modelo antes de pausar la evaluación.
     """
     settings = get_settings()
     if client is None:
@@ -81,8 +97,10 @@ def evaluate_offer(
             raise ValueError("Falta GEMINI_API_KEY.")
         client = genai.Client(api_key=settings.gemini_api_key)
 
-    model_name = model or settings.gemini_model
-    prompt_version = hashlib.sha256(load_system_prompt().encode()).hexdigest()[:12]
+    prompt = load_system_prompt()
+    model_order = _model_attempt_order(model)
+    model_name = model_order[0]
+    prompt_version = hashlib.sha256(prompt.encode()).hexdigest()[:12]
     payload = {
         "offer": offer,
         "cv_profile": cv_profile,
@@ -93,7 +111,7 @@ def evaluate_offer(
     }
     request = {
         "model": model_name,
-        "contents": (load_system_prompt() + "\n\nINPUT JSON:\n" + json.dumps(payload, ensure_ascii=False)),
+        "contents": (prompt + "\n\nINPUT JSON:\n" + json.dumps(payload, ensure_ascii=False)),
         "config": {
             "response_mime_type": "application/json",
             "response_schema": OfferEvaluation,
@@ -101,48 +119,76 @@ def evaluate_offer(
         },
     }
     response = None
-    for attempt in range(5):
-        try:
-            response = client.models.generate_content(**request)
-            break
-        except Exception as exc:
-            # Una cuota diaria agotada no es un fallo transitorio: no reintentar
-            # cada oferta. Pausar la etapa y conservar todo lo persistido.
-            quota_wait = _daily_quota_retry_seconds(str(exc))
-            if quota_wait is not None:
-                message = (
-                    f"Gemini agotó la cuota diaria gratuita del modelo {model_name}. "
-                    f"Google indicó esperar aproximadamente {quota_wait:.0f} segundos. "
-                    "La evaluación se pausó; las ofertas pendientes se conservan."
-                )
-                raise GeminiEvaluationDeferred(message, quota_wait, model_name) from exc
-            if _is_unavailable_model_error(exc) and model_name != FALLBACK_MODEL:
+    deferred_waits: list[tuple[float, str]] = []
+    last_unavailable_error = None
+
+    for model_index, candidate in enumerate(model_order):
+        model_name = candidate
+        request["model"] = model_name
+        for attempt in range(5):
+            try:
+                response = client.models.generate_content(**request)
+                break
+            except Exception as exc:
+                quota_wait = _daily_quota_retry_seconds(str(exc))
+                if quota_wait is not None:
+                    deferred_waits.append((quota_wait, model_name))
+                    logger.warning(
+                        "Cuota diaria agotada para Gemini %s; se prueba el siguiente modelo.",
+                        model_name,
+                    )
+                    break
+
+                if _is_unavailable_model_error(exc):
+                    last_unavailable_error = exc
+                    logger.warning(
+                        "El modelo Gemini %s no está disponible; se prueba el siguiente modelo.",
+                        model_name,
+                    )
+                    break
+
+                if not _is_retryable_error(exc):
+                    raise
+
+                delay = _retry_delay_seconds(exc, attempt)
+                if delay > MAX_INLINE_RETRY_DELAY_SECONDS:
+                    deferred_waits.append((delay, model_name))
+                    logger.warning(
+                        "Gemini %s requiere esperar %.1f s; se prueba el siguiente modelo.",
+                        model_name, delay,
+                    )
+                    break
+
+                if attempt >= 4:
+                    raise
                 logger.warning(
-                    "El modelo Gemini %s ya no está disponible; se cambia automáticamente a %s.",
-                    model_name, FALLBACK_MODEL,
+                    "Gemini evaluación transitoria (%s); reintento %s/4 en %.1f s. Modelo=%s",
+                    type(exc).__name__, attempt + 1, delay, model_name,
                 )
-                model_name = FALLBACK_MODEL
-                request["model"] = model_name
-                continue
-            if not _is_retryable_error(exc):
-                raise
-            delay = _retry_delay_seconds(exc, attempt)
-            if delay > MAX_INLINE_RETRY_DELAY_SECONDS:
-                message = (
-                    f"Gemini solicitó esperar {delay:.0f} segundos para el modelo {model_name}. "
-                    "La evaluación se pausó para no bloquear la aplicación; las ofertas pendientes "
-                    "se conservan para reanudarlas en otra ejecución."
-                )
-                raise GeminiEvaluationDeferred(message, delay, model_name) from exc
-            if attempt >= 4:
-                raise
-            logger.warning(
-                "Gemini evaluación transitoria (%s); reintento %s/4 en %.1f s. Modelo=%s",
-                type(exc).__name__, attempt + 1, delay, model_name,
-            )
-            time.sleep(delay)
+                time.sleep(delay)
+
+            if response is not None:
+                break
+
+        if response is not None:
+            break
+
     if response is None:
+        if deferred_waits:
+            retry_after, deferred_model = min(deferred_waits, key=lambda item: item[0])
+            message = (
+                "Los modelos Gemini disponibles alcanzaron sus cuotas o límites temporales. "
+                f"La evaluación se pausó; vuelva a intentarlo en aproximadamente {retry_after:.0f} segundos. "
+                "Las ofertas pendientes se conservan."
+            )
+            raise GeminiEvaluationDeferred(message, retry_after, deferred_model)
+        if last_unavailable_error is not None:
+            raise RuntimeError(
+                "Ninguno de los modelos Gemini configurados está disponible. "
+                "Revise los identificadores y el acceso de la API."
+            ) from last_unavailable_error
         raise RuntimeError("Gemini no devolvió respuesta de evaluación.")
+
     result = OfferEvaluation.model_validate_json(response.text).model_dump()
     return {
         "evaluation": result,

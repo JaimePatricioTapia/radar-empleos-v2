@@ -599,3 +599,34 @@ Esta mejora reutiliza las tablas y políticas RLS existentes `user_search_portal
 | ID | Fecha | Requisitos | Decisión | Estado |
 |---|---|---|---|---|
 | CHG-2026-011 | 2026-11-26 | RF-056–RF-068, QA-066–QA-074 | El propietario solicita evaluar URLs y términos antes de incorporarlos al stock, impedir portales repetidos o incompatibles y requerir aprobación explícita. | Implementación en rama feature/validated-search-catalogs; pendiente CI, revisión y PR. |
+
+
+## 18. Prioridad de modelos Gemini y fallback por cuota (CHG-2026-010)
+
+El evaluador generativo debe utilizar primero los modelos Flash-Lite para aprovechar sus mayores cuotas y menor costo, sin perder la posibilidad de recurrir a modelos de mayor capacidad. La prioridad queda fijada así:
+
+1. `gemini-3.5-flash-lite`
+2. `gemini-3.1-flash-lite`
+3. `gemini-3.8-flash`
+4. `gemini-3.6-flash`
+
+- La prioridad se aplica por defecto a cada evaluación; no depende de un único `GEMINI_MODEL` configurado en secretos.
+- Si un modelo informa cuota diaria agotada, indisponibilidad o un rate limit que exige esperar más de 60 segundos, el evaluador prueba el siguiente modelo.
+- Los errores transitorios con espera de hasta 60 segundos se reintentan en el mismo modelo, con el límite existente.
+- Si todos los modelos están limitados por cuota o espera, se pausa la evaluación, conserva las ofertas pendientes y comunica el menor tiempo de reintento informado.
+- La respuesta persistida debe registrar el modelo que realmente generó la evaluación.
+- No se cambia la API key, facturación, cuotas del proyecto, límites preventivos internos ni esquema/datos de Supabase.
+
+| ID | Requisito / prueba | Criterio de aceptación |
+|---|---|---|
+| RF-069 | Prioridad Flash-Lite | La primera llamada usa `gemini-3.5-flash-lite`; el orden completo coincide con la lista aprobada. |
+| RF-070 | Fallback por cuota | Si un modelo agota su cuota diaria, se prueba el siguiente sin pausar toda la evaluación. |
+| RF-071 | Fallback por indisponibilidad | Un modelo inexistente/no habilitado se omite y se prueba el siguiente. |
+| RF-072 | Pausa tras agotar la cadena | Solo se pausa cuando todos los modelos disponibles están limitados; se conserva el trabajo pendiente. |
+| QA-075 | Primer modelo disponible | Se llama solo a `gemini-3.5-flash-lite` y se registra ese modelo. |
+| QA-076 | Primer modelo sin cuota | Se intenta `gemini-3.1-flash-lite` y se registra el modelo que responde. |
+| QA-077 | Dos modelos limitados | Se continúa en orden con `gemini-3.8-flash` y luego `gemini-3.6-flash`. |
+| QA-078 | Todos los modelos limitados | Se pausa sin espera bloqueante y se conservan las ofertas pendientes. |
+| QA-079 | Rate limit breve | Se mantiene el reintento en el mismo modelo sin saltar al siguiente. |
+
+| CHG-2026-010 | 2026-11-28 | RF-069–RF-072, QA-075–QA-079 | Priorizar modelos Gemini Flash-Lite y activar fallback secuencial por cuota, indisponibilidad o espera extensa. Sin cambios en Supabase ni facturación. | En implementación y pruebas. |
