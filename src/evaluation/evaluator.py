@@ -49,7 +49,7 @@ def _daily_quota_retry_seconds(message: str) -> float | None:
     )):
         return None
     match = re.search(
-        r"retry in\\s+(?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+(?:\\.\\d+)?)s)",
+        r"retry in\s+(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)",
         message,
         flags=re.IGNORECASE,
     )
