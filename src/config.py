@@ -22,8 +22,7 @@ def _setting(name: str, default=None):
 @dataclass(frozen=True)
 class Settings:
     gemini_api_key: str | None = _setting("GEMINI_API_KEY")
-    # Gemini 2.5 Flash fue retirado el 20-10-2026; 3.8 Flash es el reemplazo.
-    gemini_model: str = _setting("GEMINI_MODEL", "gemini-3.8-flash")
+    # El evaluador aplica una prioridad fija de modelos para aprovechar cuotas Lite.
     embedding_model: str = _setting("GEMINI_EMBEDDING_MODEL", "gemini-embedding-001")
     embedding_dimensions: int = int(_setting("GEMINI_EMBEDDING_DIMENSIONS", "3072"))
     # Topes conservadores para operación gratuita. Los secretos pueden reducirlos,
